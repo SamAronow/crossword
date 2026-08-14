@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add a puzzle · Crossword</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#121212;--muted:#6b6b6b;--line:#dcdcdc;
+    --select:#ffda00;--highlight:#a7d8ff;--bad:#c8102e;--good:#0a7d33;
+    --font:"Libre Franklin","Franklin Gothic Medium","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--font);color:var(--ink);background:#fff;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:0 20px 80px}
+
+  header.masthead{
+    display:flex;align-items:center;gap:14px;
+    border-bottom:1px solid var(--ink);padding:16px 0;margin-bottom:26px;
+  }
+  header.masthead h1{font-size:18px;font-weight:700;margin:0;flex:1}
+  .back{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;white-space:nowrap}
+  .back:hover{text-decoration:underline}
+
+  .cols{display:flex;gap:34px;align-items:flex-start}
+  .left{flex:0 0 320px}
+  .right{flex:1;min-width:0}
+  @media (max-width:800px){.cols{flex-direction:column}.left{flex:none;width:100%}}
+
+  label{display:block;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;margin:0 0 5px}
+  .field{margin-bottom:16px}
+  input[type=text],textarea{
+    width:100%;font-family:var(--font);font-size:14px;color:var(--ink);
+    border:1px solid var(--line);border-radius:4px;padding:9px 10px;background:#fff;
+  }
+  input[type=text]:focus,textarea:focus{outline:none;border-color:var(--ink)}
+  textarea#grid{
+    font-family:var(--mono);font-size:20px;line-height:1.5;letter-spacing:.28em;
+    text-transform:uppercase;min-height:170px;resize:vertical;
+  }
+  .hint{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5}
+  .row2{display:flex;gap:12px}
+  .row2 .field{flex:1}
+
+  .problem{
+    display:none;margin:0 0 16px;padding:10px 12px;border-radius:4px;
+    background:#fdeaec;color:var(--bad);font-size:13px;font-weight:500;
+  }
+  .problem.show{display:block}
+
+  h2.sub{font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;margin:0 0 10px}
+
+  .preview{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;margin-bottom:26px}
+  .grid{display:grid;gap:1px;background:#000;border:1px solid #000;width:260px;flex:none}
+  .cell{position:relative;background:#fff;aspect-ratio:1/1;display:flex;
+    align-items:center;justify-content:center;font-weight:600;font-size:22px}
+  .cell.black{background:#000}
+  .cell .n{position:absolute;top:1px;left:2px;font-size:9px;font-weight:400}
+
+  .entries{flex:1;min-width:260px}
+  .entrygroup{margin-bottom:18px}
+  .entry{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .entry .tag{
+    font-family:var(--mono);font-size:12px;white-space:nowrap;
+    min-width:104px;color:var(--muted);
+  }
+  .entry .tag b{color:var(--ink)}
+  .entry input{flex:1}
+  .entry input.missing{border-color:var(--bad);background:#fffafa}
+
+  .actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    border-top:1px solid var(--line);padding-top:18px}
+  button{
+    font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;
+    padding:11px 22px;border-radius:22px;border:1px solid var(--ink);
+    background:var(--ink);color:#fff;
+  }
+  button.ghost{background:#fff;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .said{font-size:13px;color:var(--muted)}
+  .said.ok{color:var(--good);font-weight:600}
+  .said.err{color:var(--bad);font-weight:600}
+  .said a{color:inherit}
+
+  details{margin-top:26px;font-size:13px;color:var(--muted)}
+  summary{cursor:pointer;font-weight:600}
+  pre{
+    font-family:var(--mono);font-size:12px;line-height:1.5;color:var(--ink);
+    background:#f7f7f7;border:1px solid var(--line);border-radius:4px;
+    padding:14px;overflow-x:auto;margin-top:10px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <a class="back" href="index.html">&larr; Puzzles</a>
+    <h1>Add a puzzle</h1>
+    <span class="said" id="dbstate">&nbsp;</span>
+  </header>
+
+  <div class="cols">
+    <div class="left">
+      <div class="field">
+        <label for="pid">Puzzle id (used in the link)</label>
+        <input type="text" id="pid" spellcheck="false">
+        <p class="hint">Becomes <span class="mono">puzzle.html?id=&hellip;</span></p>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="byline">Byline</label>
+          <input type="text" id="byline">
+        </div>
+        <div class="field">
+          <label for="difficulty">Difficulty</label>
+          <input type="text" id="difficulty">
+        </div>
+      </div>
+      <div class="field">
+        <label for="grid">Grid</label>
+        <textarea id="grid" spellcheck="false"></textarea>
+        <p class="hint">One row per line. A letter is that square's answer,
+          a dot is a black square. Every row the same length.</p>
+      </div>
+    </div>
+
+    <div class="right">
+      <p class="problem" id="problem"></p>
+      <div class="preview">
+        <div>
+          <h2 class="sub">Numbering</h2>
+          <div class="grid" id="preview"></div>
+        </div>
+        <div class="entries">
+          <h2 class="sub">Clues</h2>
+          <div id="clueFields"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="save">Add to database</button>
+        <button type="button" class="ghost" id="reset">Reload sample</button>
+        <span class="said" id="said">&nbsp;</span>
+      </div>
+
+      <details>
+        <summary>What gets stored</summary>
+        <p>This is the whole record written to <code>crossword/puzzles/&lt;id&gt;</code>.
+          Solving state is kept separately under <code>crossword/solves/&lt;id&gt;</code>,
+          so clearing a grid never touches the puzzle itself.</p>
+        <pre id="json"></pre>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="crossword-core.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const clues = { across: {}, down: {} };
+
+function loadSample() {
+  $("pid").value = SAMPLE_PUZZLE.id;
+  $("title").value = SAMPLE_PUZZLE.title;
+  $("byline").value = SAMPLE_PUZZLE.byline;
+  $("difficulty").value = SAMPLE_PUZZLE.difficulty;
+  $("grid").value = SAMPLE_PUZZLE.grid.join("\n");
+  clues.across = Object.assign({}, SAMPLE_PUZZLE.clues.across);
+  clues.down = Object.assign({}, SAMPLE_PUZZLE.clues.down);
+  refresh();
+}
+
+function readGrid() {
+  return $("grid").value.split(/\r?\n/)
+    .map(row => row.toUpperCase().replace(/[^A-Z.]/g, ""))
+    .filter(row => row.length);
+}
+
+function draft() {
+  return {
+    id: ($("pid").value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-|-$/g, "")),
+    title: $("title").value.trim(),
+    byline: $("byline").value.trim(),
+    difficulty: $("difficulty").value.trim(),
+    grid: readGrid(),
+    clues
+  };
+}
+
+/* Redraw the numbered grid and the clue fields from whatever's typed. */
+function refresh() {
+  const grid = readGrid();
+  const problem = gridProblem(grid);
+  const problemEl = $("problem");
+  problemEl.textContent = problem || "";
+  problemEl.classList.toggle("show", !!problem);
+
+  const preview = $("preview"), fields = $("clueFields");
+  preview.innerHTML = ""; fields.innerHTML = "";
+  $("save").disabled = !!problem;
+
+  if (problem) { $("json").textContent = ""; return; }
+
+  const M = buildModel({ grid, clues });
+  preview.style.gridTemplateColumns = `repeat(${M.cols}, 1fr)`;
+  M.cells.forEach(row => row.forEach(cell => {
+    const el = document.createElement("div");
+    el.className = "cell" + (cell.black ? " black" : "");
+    if (!cell.black) el.innerHTML = `<span class="n">${cell.number || ""}</span>${cell.solution}`;
+    preview.appendChild(el);
+  }));
+
+  // Clue numbers come from the grid, so the fields are generated, never typed.
+  ["across", "down"].forEach(dir => {
+    const group = document.createElement("div");
+    group.className = "entrygroup";
+    group.innerHTML = `<h2 class="sub">${dir}</h2>`;
+    M.entries[dir].forEach(e => {
+      const answer = entryAnswer(e);
+      const line = document.createElement("div");
+      line.className = "entry";
+      line.innerHTML = `<span class="tag"><b>${e.num}${dir === "across" ? "A" : "D"}</b> ${answer}</span>`;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Clue for " + answer;
+      input.value = clues[dir][e.num] || "";
+      input.classList.toggle("missing", !input.value);
+      input.addEventListener("input", () => {
+        clues[dir][e.num] = input.value;
+        input.classList.toggle("missing", !input.value);
+        $("json").textContent = JSON.stringify(serializeDraft(), null, 2);
+      });
+      line.appendChild(input);
+      group.appendChild(line);
+    });
+    fields.appendChild(group);
+  });
+
+  $("json").textContent = JSON.stringify(serializeDraft(), null, 2);
+}
+
+/* Same record that gets written, minus the server timestamp placeholder. */
+function serializeDraft() {
+  const d = draft();
+  const grid = d.grid;
+  const M = buildModel({ grid, clues });
+  const trim = dir => {
+    const out = {};
+    M.entries[dir].forEach(e => { if (clues[dir][e.num]) out[e.num] = clues[dir][e.num]; });
+    return out;
+  };
+  return {
+    title: d.title || d.id,
+    byline: d.byline,
+    difficulty: d.difficulty,
+    grid: grid.join("\n"),
+    clues: { across: trim("across"), down: trim("down") }
+  };
+}
+
+function say(msg, kind) {
+  const el = $("said");
+  el.innerHTML = msg;
+  el.className = "said" + (kind ? " " + kind : "");
+}
+
+$("save").addEventListener("click", async () => {
+  const d = draft();
+  if (!d.id) return say("Give the puzzle an id first.", "err");
+  const problem = gridProblem(d.grid);
+  if (problem) return say(problem, "err");
+
+  const record = serializeDraft();
+  const M = buildModel({ grid: d.grid, clues });
+  const blank = M.order.filter(e => !clues[e.dir][e.num]).length;
+  if (blank && !confirm(blank + " clue" + (blank > 1 ? "s are" : " is") + " still empty. Save anyway?")) return;
+
+  try {
+    const existing = await puzzleRef(d.id).once("value");
+    if (existing.exists() && !confirm(`"${d.id}" already exists. Replace it? Anything typed into it stays.`)) return;
+
+    record.createdAt = existing.exists()
+      ? (existing.val().createdAt || firebase.database.ServerValue.TIMESTAMP)
+      : firebase.database.ServerValue.TIMESTAMP;
+
+    $("save").disabled = true;
+    await puzzleRef(d.id).set(record);
+    $("save").disabled = false;
+    say(`Saved. <a href="puzzle.html?id=${encodeURIComponent(d.id)}">Open the puzzle</a>
+         &middot; <a href="index.html">back to the list</a>`, "ok");
+  } catch (err) {
+    console.error(err);
+    $("save").disabled = false;
+    say("Couldn't write to the database — check your rules allow writes.", "err");
+  }
+});
+
+$("reset").addEventListener("click", () => {
+  if (confirm("Replace what's on this page with the sample puzzle?")) { loadSample(); say("&nbsp;"); }
+});
+
+["pid", "title", "byline", "difficulty", "grid"].forEach(id =>
+  $(id).addEventListener("input", () => { refresh(); say("&nbsp;"); }));
+
+db.ref(".info/connected").on("value", s => {
+  $("dbstate").textContent = s.val() ? "" : "no database connection";
+  $("dbstate").className = "said" + (s.val() ? "" : " err");
+});
+
+loadSample();
+</script>
+</body>
+</html>

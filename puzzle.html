@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Crossword</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#121212;
+    --muted:#6b6b6b;
+    --line:#dcdcdc;
+    --select:#ffda00;
+    --highlight:#a7d8ff;
+    --cluebar:#dce9f7;
+    --reveal:#c8102e;
+    --font:"Libre Franklin","Franklin Gothic Medium","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --cell:56px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    font-family:var(--font);
+    color:var(--ink);
+    background:#fff;
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
+  }
+  button{font-family:inherit;color:inherit}
+
+  /* ---------- header ---------- */
+  .masthead{
+    display:flex;align-items:center;gap:14px;
+    padding:10px 16px;
+    border-bottom:1px solid var(--ink);
+  }
+  .back{
+    font-size:13px;font-weight:600;text-decoration:none;color:var(--ink);
+    white-space:nowrap;
+  }
+  .back:hover{text-decoration:underline}
+  .masthead h1{
+    font-size:16px;font-weight:700;margin:0;
+    letter-spacing:.02em;
+    flex:1;
+    text-align:center;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .headright{display:flex;align-items:center;gap:12px}
+  .timer{
+    font-variant-numeric:tabular-nums;
+    font-size:14px;font-weight:600;color:var(--muted);
+    min-width:42px;text-align:right;
+  }
+  .who{display:flex}
+  .chip{
+    width:26px;height:26px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:11px;font-weight:700;
+    border:2px solid #fff;
+    margin-left:-6px;
+  }
+  .chip:first-child{margin-left:0}
+
+  /* ---------- toolbar ---------- */
+  .tools{
+    display:flex;align-items:center;gap:8px;
+    padding:8px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  .menu{position:relative}
+  .menu > button{
+    background:#fff;border:1px solid var(--line);border-radius:16px;
+    padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer;
+  }
+  .menu > button:hover{border-color:#999}
+  .menu > button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+  .menu ul{
+    display:none;position:absolute;z-index:30;top:calc(100% + 6px);left:0;
+    list-style:none;margin:0;padding:6px 0;min-width:140px;
+    background:#fff;border:1px solid var(--line);border-radius:6px;
+    box-shadow:0 8px 24px rgba(0,0,0,.14);
+  }
+  .menu.open ul{display:block}
+  .menu li button{
+    display:block;width:100%;text-align:left;background:none;border:0;
+    padding:8px 14px;font-size:13px;cursor:pointer;
+  }
+  .menu li button:hover{background:#f2f2f2}
+  .spacer{flex:1}
+  .status{font-size:12px;color:var(--muted)}
+
+  /* ---------- clue bar ---------- */
+  .cluebar{
+    display:flex;align-items:stretch;
+    background:var(--cluebar);
+    border-bottom:1px solid var(--line);
+  }
+  .cluebar button{
+    background:none;border:0;padding:0 16px;font-size:20px;line-height:1;
+    cursor:pointer;color:#333;
+  }
+  .cluebar button:hover{background:rgba(0,0,0,.05)}
+  .cluetext{
+    flex:1;padding:12px 6px;font-size:15px;line-height:1.35;
+    display:flex;align-items:center;gap:8px;min-height:48px;
+  }
+  .cluetext b{font-weight:700;white-space:nowrap}
+
+  /* ---------- layout ---------- */
+  .board{
+    display:flex;gap:36px;
+    padding:22px 16px 40px;
+    align-items:flex-start;
+    justify-content:center;
+  }
+  .gridwrap{position:relative}
+  .grid{
+    display:grid;gap:1px;background:#000;border:1px solid #000;
+    width:min(88vw, 520px);
+    touch-action:manipulation;
+  }
+  .cell{
+    position:relative;background:#fff;aspect-ratio:1/1;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;user-select:none;
+    font-weight:600;
+    font-size:calc(var(--cell)*.58);
+    line-height:1;
+  }
+  .cell.black{background:#000;cursor:default}
+  .cell.hl{background:var(--highlight)}
+  .cell.sel{background:var(--select)}
+  .cell .num{
+    position:absolute;top:2px;left:3px;
+    font-size:calc(var(--cell)*.24);font-weight:400;line-height:1;
+    pointer-events:none;
+  }
+  .cell .ltr{pointer-events:none;padding-top:calc(var(--cell)*.09)}
+  .cell.revealed .ltr{color:var(--reveal)}
+  .cell.revealed::after{
+    content:"";position:absolute;top:0;right:0;
+    border-top:calc(var(--cell)*.2) solid var(--reveal);
+    border-left:calc(var(--cell)*.2) solid transparent;
+  }
+  .cell.wrong::before{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(to top right,
+      transparent calc(50% - 1px), var(--reveal) calc(50% - 1px),
+      var(--reveal) calc(50% + 1px), transparent calc(50% + 1px));
+    pointer-events:none;
+  }
+  .cell.peer{box-shadow:inset 0 0 0 3px var(--peer)}
+
+  /* ---------- clue lists ---------- */
+  .clues{display:flex;gap:28px;max-width:520px;flex:1}
+  .cluelist{flex:1;min-width:0}
+  .cluelist h2{
+    font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    margin:0 0 8px;padding-bottom:6px;border-bottom:1px solid var(--ink);
+  }
+  .cluelist ol{
+    list-style:none;margin:0;padding:0;
+    max-height:56vh;overflow-y:auto;
+  }
+  .cluelist li{
+    display:flex;gap:8px;padding:6px 8px 6px 4px;
+    font-size:14px;line-height:1.35;cursor:pointer;
+    border-left:3px solid transparent;
+  }
+  .cluelist li span.n{font-weight:700;min-width:1.6em;text-align:right}
+  .cluelist li:hover{background:#f5f5f5}
+  .cluelist li.cross{background:#eef4fb}
+  .cluelist li.active{background:var(--highlight);border-left-color:#1a6ec4}
+  .cluelist li.done span.t{color:#8a8a8a}
+
+  /* ---------- solved modal ---------- */
+  .scrim{
+    display:none;position:fixed;inset:0;z-index:60;
+    background:rgba(0,0,0,.45);
+    align-items:center;justify-content:center;padding:20px;
+  }
+  .scrim.open{display:flex}
+  .modal{
+    background:#fff;border-radius:8px;max-width:340px;width:100%;
+    padding:28px 26px;text-align:center;
+  }
+  .modal h2{margin:0 0 6px;font-size:22px;letter-spacing:.02em}
+  .modal p{margin:0 0 20px;font-size:14px;color:var(--muted);line-height:1.5}
+  .modal .time{
+    font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;
+    margin:0 0 20px;
+  }
+  .modal a,.modal button{
+    display:block;width:100%;padding:11px;border-radius:20px;
+    font-size:14px;font-weight:600;text-decoration:none;cursor:pointer;
+    border:1px solid var(--ink);background:var(--ink);color:#fff;margin-bottom:8px;
+  }
+  .modal button.ghost{background:#fff;color:var(--ink)}
+
+  #hidden{
+    position:absolute;opacity:0;height:1px;width:1px;padding:0;border:0;
+    font-size:16px;left:0;top:0;
+  }
+
+  .missing{padding:60px 20px;text-align:center}
+  .missing a{color:var(--ink)}
+
+  @media (max-width:860px){
+    .board{flex-direction:column;align-items:center;gap:24px;padding:16px 12px 40px}
+    .clues{max-width:520px;width:100%}
+    .cluelist ol{max-height:none}
+  }
+  @media (max-width:420px){
+    .tools{gap:6px;padding:8px 10px}
+    .menu > button{padding:6px 10px;font-size:12px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="crossword-core.js"></script>
+<script>
+/* ==================================================================
+   1. Load the puzzle out of the database
+================================================================== */
+const puzzleId = new URLSearchParams(location.search).get("id");
+const app = document.getElementById("app");
+
+function fail(head, body) {
+  app.innerHTML = `<div class="missing"><h1>${head}</h1><p>${body}</p>
+    <p><a href="index.html">Back to puzzles</a></p></div>`;
+}
+
+if (!puzzleId) {
+  fail("No puzzle chosen", "A puzzle link carries its id, like <code>puzzle.html?id=mini-1</code>.");
+} else {
+  app.innerHTML = `<div class="missing"><p>Loading&hellip;</p></div>`;
+  puzzleRef(puzzleId).once("value").then(snap => {
+    const p = normalizePuzzle(puzzleId, snap.val());
+    if (!p) return fail("No such puzzle",
+      `Nothing is stored under &ldquo;${puzzleId}&rdquo;. You can add one on the <a href="new.html">new puzzle</a> page.`);
+    const problem = gridProblem(p.grid);
+    if (problem) return fail("That puzzle's grid won't load", problem);
+    start(p);
+  }).catch(err => {
+    console.error(err);
+    fail("Can't reach the database", "Check the config in firebase-config.js and your database rules.");
+  });
+}
+
+function start(puzzle) {
+const me = loadSolver();
+document.title = puzzle.title + " \u00b7 Crossword";
+
+/* ==================================================================
+   2. Build the model: cells, numbers, entries
+================================================================== */
+const M = buildModel(puzzle);
+
+/* ==================================================================
+   3. Shared + local state
+================================================================== */
+const S = {
+  letters: {},    // "r_c" -> {l, by, cl}   (shared)
+  revealed: {},   // "r_c" -> true          (shared)
+  wrong: {},      // "r_c" -> true          (this browser only)
+  players: {},    // id -> {name,color,r,c,dir,ts}
+  startedAt: null,
+  solvedAt: null,
+  cur: { r: 0, c: 0, dir: "across" },
+  ready: false,
+  modalShown: false
+};
+
+const key = (r, c) => r + "_" + c;
+const letterAt = cell => (S.letters[key(cell.r, cell.c)] || {}).l || "";
+
+const pRef        = solveRef(puzzleId);
+const cellsRef    = pRef.child("cells");
+const revealedRef = pRef.child("revealed");
+const metaRef     = pRef.child("meta");
+const playersRef  = pRef.child("players");
+const meRef       = playersRef.child(me.id);
+
+/* ==================================================================
+   4. Page chrome
+================================================================== */
+document.getElementById("app").innerHTML = `
+  <div class="masthead">
+    <a class="back" href="index.html">&larr; Puzzles</a>
+    <h1>${puzzle.title}</h1>
+    <div class="headright">
+      <div class="who" id="who"></div>
+      <span class="timer" id="timer">0:00</span>
+    </div>
+  </div>
+
+  <div class="tools">
+    <div class="menu" data-menu="check">
+      <button type="button">Check</button>
+      <ul>
+        <li><button type="button" data-act="check-square">Square</button></li>
+        <li><button type="button" data-act="check-word">Word</button></li>
+        <li><button type="button" data-act="check-puzzle">Puzzle</button></li>
+      </ul>
+    </div>
+    <div class="menu" data-menu="reveal">
+      <button type="button">Reveal</button>
+      <ul>
+        <li><button type="button" data-act="reveal-square">Square</button></li>
+        <li><button type="button" data-act="reveal-word">Word</button></li>
+        <li><button type="button" data-act="reveal-puzzle">Puzzle</button></li>
+      </ul>
+    </div>
+    <div class="menu" data-menu="clear">
+      <button type="button">Clear</button>
+      <ul>
+        <li><button type="button" data-act="clear-word">Word</button></li>
+        <li><button type="button" data-act="clear-puzzle">Puzzle</button></li>
+      </ul>
+    </div>
+    <span class="spacer"></span>
+    <span class="status" id="status">Connecting&hellip;</span>
+  </div>
+
+  <div class="cluebar">
+    <button type="button" id="prevClue" aria-label="Previous clue">&lsaquo;</button>
+    <div class="cluetext" id="clueText"></div>
+    <button type="button" id="nextClue" aria-label="Next clue">&rsaquo;</button>
+  </div>
+
+  <div class="board">
+    <div class="gridwrap">
+      <div class="grid" id="grid" role="grid" aria-label="${puzzle.title} grid"></div>
+      <input id="hidden" autocomplete="off" autocorrect="off" autocapitalize="characters"
+             spellcheck="false" inputmode="text" aria-label="Type a letter into the selected square">
+    </div>
+    <div class="clues">
+      <div class="cluelist"><h2>Across</h2><ol id="listAcross"></ol></div>
+      <div class="cluelist"><h2>Down</h2><ol id="listDown"></ol></div>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim">
+    <div class="modal">
+      <h2>Solved</h2>
+      <p id="solvedWho">Nice work.</p>
+      <p class="time" id="solvedTime">0:00</p>
+      <a href="index.html">Back to puzzles</a>
+      <button type="button" class="ghost" id="closeModal">Keep looking at it</button>
+    </div>
+  </div>
+`;
+
+const gridEl   = document.getElementById("grid");
+const hidden   = document.getElementById("hidden");
+const clueText = document.getElementById("clueText");
+const statusEl = document.getElementById("status");
+const timerEl  = document.getElementById("timer");
+const whoEl    = document.getElementById("who");
+const scrim    = document.getElementById("scrim");
+
+/* ---- draw the grid once ---- */
+gridEl.style.gridTemplateColumns = `repeat(${M.cols}, 1fr)`;
+for (let r = 0; r < M.rows; r++) {
+  for (let c = 0; c < M.cols; c++) {
+    const cell = M.cells[r][c];
+    const el = document.createElement("div");
+    el.className = "cell" + (cell.black ? " black" : "");
+    el.dataset.r = r; el.dataset.c = c;
+    if (!cell.black) {
+      el.setAttribute("role", "gridcell");
+      el.innerHTML = `<span class="num">${cell.number || ""}</span><span class="ltr"></span>`;
+    }
+    cell.el = el;
+    gridEl.appendChild(el);
+  }
+}
+
+/* keep font sizes proportional to the drawn cell size */
+function sizeCells() {
+  document.documentElement.style.setProperty("--cell", (gridEl.clientWidth / M.cols) + "px");
+}
+new ResizeObserver(sizeCells).observe(gridEl);
+sizeCells();
+
+/* ---- clue lists ---- */
+function buildClueList(dir, ol) {
+  M.entries[dir].forEach(e => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="n">${e.num}</span><span class="t">${e.clue}</span>`;
+    li.addEventListener("click", () => {
+      const target = e.cells.find(cell => !letterAt(cell)) || e.cells[0];
+      S.cur.dir = dir;
+      select(target.r, target.c, dir);
+      focusHidden();
+    });
+    e.li = li;
+    ol.appendChild(li);
+  });
+}
+buildClueList("across", document.getElementById("listAcross"));
+buildClueList("down", document.getElementById("listDown"));
+
+/* ==================================================================
+   5. Cursor + painting
+================================================================== */
+const isOpen = (r, c) => r >= 0 && r < M.rows && c >= 0 && c < M.cols && !M.cells[r][c].black;
+
+function curCell() { return M.cells[S.cur.r][S.cur.c]; }
+function curEntry() {
+  const cell = curCell();
+  return cell[S.cur.dir] || cell.across || cell.down;
+}
+
+function select(r, c, dir) {
+  if (!isOpen(r, c)) return false;
+  S.cur.r = r; S.cur.c = c;
+  if (dir) S.cur.dir = dir;
+  if (!M.cells[r][c][S.cur.dir]) S.cur.dir = S.cur.dir === "across" ? "down" : "across";
+  paint();
+  queuePresence();
+  return true;
+}
+
+function toggleDir() {
+  const other = S.cur.dir === "across" ? "down" : "across";
+  if (curCell()[other]) { S.cur.dir = other; paint(); queuePresence(); }
+}
+
+function paintCell(cell) {
+  const el = cell.el;
+  if (cell.black) return;
+  const k = key(cell.r, cell.c);
+  const rec = S.letters[k];
+  const ltr = el.querySelector(".ltr");
+  ltr.textContent = rec ? rec.l : "";
+  ltr.style.color = !rec ? "" : (rec.by === me.id ? "" : (rec.cl || "#1a6ec4"));
+  el.classList.toggle("revealed", !!S.revealed[k]);
+  el.classList.toggle("wrong", !!S.wrong[k]);
+  if (S.revealed[k]) ltr.style.color = "";
+}
+
+function paint() {
+  const entry = curEntry();
+  const inWord = new Set(entry ? entry.cells.map(cell => key(cell.r, cell.c)) : []);
+
+  // other people's cursors
+  const peers = {};
+  Object.entries(S.players).forEach(([id, p]) => {
+    if (id === me.id || !p) return;
+    if (serverNow() - (p.ts || 0) > 90000) return;
+    if (typeof p.r !== "number") return;
+    peers[key(p.r, p.c)] = p.color || "#1a6ec4";
+  });
+
+  M.openCells.forEach(cell => {
+    const k = key(cell.r, cell.c);
+    const el = cell.el;
+    el.classList.toggle("sel", cell.r === S.cur.r && cell.c === S.cur.c);
+    el.classList.toggle("hl", inWord.has(k) && !(cell.r === S.cur.r && cell.c === S.cur.c));
+    if (peers[k]) { el.classList.add("peer"); el.style.setProperty("--peer", peers[k]); }
+    else el.classList.remove("peer");
+    paintCell(cell);
+  });
+
+  // clue bar + clue lists
+  if (entry) {
+    clueText.innerHTML = `<b>${entry.num}${entry.dir === "across" ? "A" : "D"}</b><span>${entry.clue}</span>`;
+  }
+  const crossEntry = curCell()[S.cur.dir === "across" ? "down" : "across"];
+  M.order.forEach(e => {
+    if (!e.li) return;
+    e.li.classList.toggle("active", e === entry);
+    e.li.classList.toggle("cross", e === crossEntry && e !== entry);
+    e.li.classList.toggle("done", e.cells.every(cell => letterAt(cell)));
+  });
+  if (entry && entry.li) {
+    const ol = entry.li.parentElement;
+    const top = entry.li.offsetTop, h = entry.li.offsetHeight;
+    if (top < ol.scrollTop || top + h > ol.scrollTop + ol.clientHeight) {
+      ol.scrollTop = top - ol.clientHeight / 2 + h / 2;
+    }
+  }
+  renderWho();
+}
+
+function renderWho() {
+  const list = Object.entries(S.players)
+    .filter(([, p]) => p && serverNow() - (p.ts || 0) < 90000)
+    .sort((a, b) => (a[0] === me.id ? -1 : b[0] === me.id ? 1 : 0));
+  whoEl.innerHTML = "";
+  list.slice(0, 5).forEach(([id, p]) => {
+    const d = document.createElement("div");
+    d.className = "chip";
+    d.style.background = p.color || "#666";
+    d.textContent = (p.name || "?").trim().slice(0, 2).toUpperCase();
+    d.title = id === me.id ? (p.name + " (you)") : p.name;
+    whoEl.appendChild(d);
+  });
+}
+
+/* ==================================================================
+   6. Movement — NYT keyboard behaviour
+================================================================== */
+function moveOne(dr, dc) {
+  let r = S.cur.r + dr, c = S.cur.c + dc;
+  while (r >= 0 && r < M.rows && c >= 0 && c < M.cols) {
+    if (!M.cells[r][c].black) return select(r, c);
+    r += dr; c += dc;
+  }
+  return false;
+}
+
+function indexInEntry(entry) {
+  return entry.cells.findIndex(cell => cell.r === S.cur.r && cell.c === S.cur.c);
+}
+
+function gotoEntry(step, requireEmpty) {
+  const order = M.order, L = order.length;
+  const i = order.indexOf(curEntry());
+  for (let n = 1; n <= L; n++) {
+    const e = order[(((i + step * n) % L) + L) % L];
+    const empty = e.cells.find(cell => !letterAt(cell));
+    if (requireEmpty && !empty) continue;
+    const target = empty || e.cells[0];
+    S.cur.dir = e.dir;
+    select(target.r, target.c, e.dir);
+    return;
+  }
+}
+
+function advanceAfterType() {
+  const e = curEntry();
+  if (!e) return;
+  const i = indexInEntry(e);
+  for (let j = i + 1; j < e.cells.length; j++)
+    if (!letterAt(e.cells[j])) return select(e.cells[j].r, e.cells[j].c);
+  for (let j = 0; j < i; j++)
+    if (!letterAt(e.cells[j])) return select(e.cells[j].r, e.cells[j].c);
+  if (i < e.cells.length - 1) return select(e.cells[i + 1].r, e.cells[i + 1].c);
+  gotoEntry(1, true);   // word is full — jump to the next unfinished clue
+}
+
+function stepBackInEntry() {
+  const e = curEntry();
+  if (!e) return false;
+  const i = indexInEntry(e);
+  if (i <= 0) return false;
+  return select(e.cells[i - 1].r, e.cells[i - 1].c);
+}
+
+/* ==================================================================
+   7. Writing to the database
+================================================================== */
+function ensureStarted() {
+  if (!S.startedAt) {
+    S.startedAt = serverNow();
+    metaRef.child("startedAt").set(firebase.database.ServerValue.TIMESTAMP);
+  }
+}
+
+function writeLetter(r, c, letter) {
+  const k = key(r, c);
+  const updates = {};
+  if (letter) {
+    updates["cells/" + k] = { l: letter, by: me.id, cl: me.color, at: firebase.database.ServerValue.TIMESTAMP };
+    updates["revealed/" + k] = null;
+    S.letters[k] = { l: letter, by: me.id, cl: me.color };
+    delete S.revealed[k];
+  } else {
+    updates["cells/" + k] = null;
+    updates["revealed/" + k] = null;
+    delete S.letters[k];
+    delete S.revealed[k];
+  }
+  delete S.wrong[k];
+  paintCell(M.cells[r][c]);
+  pRef.update(updates).catch(dbError);
+  checkSolved();
+}
+
+function typeLetter(ch) {
+  if (S.solvedAt) return;
+  ensureStarted();
+  writeLetter(S.cur.r, S.cur.c, ch);
+  advanceAfterType();
+}
+
+function backspace() {
+  if (S.solvedAt) return;
+  const k = key(S.cur.r, S.cur.c);
+  if (S.letters[k]) {
+    writeLetter(S.cur.r, S.cur.c, null);
+    stepBackInEntry();
+  } else if (stepBackInEntry()) {
+    writeLetter(S.cur.r, S.cur.c, null);
+  }
+  paint();
+}
+
+function checkSolved() {
+  if (S.solvedAt) return;
+  const done = M.openCells.every(cell => letterAt(cell) === cell.solution);
+  if (done) {
+    S.solvedAt = serverNow();
+    metaRef.child("solvedAt").set(firebase.database.ServerValue.TIMESTAMP);
+    showSolved();
+  }
+}
+
+function dbError(err) {
+  console.error(err);
+  statusEl.textContent = "Can't reach the database";
+}
+
+/* ==================================================================
+   8. Check / Reveal / Clear
+================================================================== */
+function scopeCells(scope) {
+  if (scope === "square") return [curCell()];
+  if (scope === "word") return curEntry() ? curEntry().cells.slice() : [];
+  return M.openCells.slice();
+}
+
+function doCheck(scope) {
+  scopeCells(scope).forEach(cell => {
+    const k = key(cell.r, cell.c);
+    const l = letterAt(cell);
+    if (!l) return;
+    if (l !== cell.solution) S.wrong[k] = true; else delete S.wrong[k];
+    paintCell(cell);
+  });
+}
+
+function doReveal(scope) {
+  const updates = {};
+  scopeCells(scope).forEach(cell => {
+    const k = key(cell.r, cell.c);
+    if (letterAt(cell) === cell.solution) return;
+    updates["cells/" + k] = { l: cell.solution, by: me.id, cl: me.color, at: firebase.database.ServerValue.TIMESTAMP };
+    updates["revealed/" + k] = true;
+    S.letters[k] = { l: cell.solution, by: me.id, cl: me.color };
+    S.revealed[k] = true;
+    delete S.wrong[k];
+  });
+  if (!Object.keys(updates).length) return;
+  ensureStarted();
+  pRef.update(updates).catch(dbError);
+  paint();
+  checkSolved();
+}
+
+function doClear(scope) {
+  const label = scope === "puzzle" ? "Clear the whole puzzle for everyone?" : "Clear this word for everyone?";
+  if (!confirm(label)) return;
+  const updates = {};
+  scopeCells(scope).forEach(cell => {
+    const k = key(cell.r, cell.c);
+    updates["cells/" + k] = null;
+    updates["revealed/" + k] = null;
+    delete S.letters[k]; delete S.revealed[k]; delete S.wrong[k];
+  });
+  if (scope === "puzzle") {
+    updates["meta"] = null;
+    S.startedAt = null; S.solvedAt = null; S.modalShown = false;
+  }
+  pRef.update(updates).catch(dbError);
+  paint();
+}
+
+document.querySelectorAll(".menu").forEach(menu => {
+  menu.querySelector("button").addEventListener("click", e => {
+    e.stopPropagation();
+    const wasOpen = menu.classList.contains("open");
+    document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
+    menu.classList.toggle("open", !wasOpen);
+  });
+});
+document.addEventListener("click", e => {
+  const btn = e.target.closest("[data-act]");
+  if (btn) {
+    const [what, scope] = btn.dataset.act.split("-");
+    if (what === "check") doCheck(scope);
+    if (what === "reveal") doReveal(scope);
+    if (what === "clear") doClear(scope);
+    focusHidden();
+  }
+  document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
+});
+
+/* ==================================================================
+   9. Input
+================================================================== */
+gridEl.addEventListener("pointerdown", e => {
+  const el = e.target.closest(".cell");
+  if (!el) return;
+  e.preventDefault();
+  document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
+  const r = +el.dataset.r, c = +el.dataset.c;
+  if (!isOpen(r, c)) return;
+  if (r === S.cur.r && c === S.cur.c) toggleDir(); else select(r, c);
+  focusHidden();
+});
+
+document.getElementById("prevClue").addEventListener("click", () => { gotoEntry(-1, false); focusHidden(); });
+document.getElementById("nextClue").addEventListener("click", () => { gotoEntry(1, false); focusHidden(); });
+document.getElementById("closeModal").addEventListener("click", () => scrim.classList.remove("open"));
+
+function focusHidden() {
+  hidden.value = SENTINEL;
+  hidden.focus({ preventScroll: true });
+  try { hidden.setSelectionRange(1, 1); } catch (e) {}
+}
+
+window.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.activeElement && document.activeElement.tagName === "INPUT" && document.activeElement !== hidden) return;
+  const k = e.key;
+
+  if (/^[a-zA-Z]$/.test(k)) { e.preventDefault(); typeLetter(k.toUpperCase()); return; }
+
+  switch (k) {
+    case "Backspace": e.preventDefault(); backspace(); return;
+    case "Delete":    e.preventDefault(); writeLetter(S.cur.r, S.cur.c, null); paint(); return;
+    case " ":         e.preventDefault(); toggleDir(); return;
+    case "Enter":     e.preventDefault(); toggleDir(); return;
+    case "Tab":       e.preventDefault(); gotoEntry(e.shiftKey ? -1 : 1, false); return;
+    case "ArrowLeft": e.preventDefault();
+      if (S.cur.dir !== "across" && curCell().across) toggleDir(); else moveOne(0, -1); return;
+    case "ArrowRight": e.preventDefault();
+      if (S.cur.dir !== "across" && curCell().across) toggleDir(); else moveOne(0, 1); return;
+    case "ArrowUp": e.preventDefault();
+      if (S.cur.dir !== "down" && curCell().down) toggleDir(); else moveOne(-1, 0); return;
+    case "ArrowDown": e.preventDefault();
+      if (S.cur.dir !== "down" && curCell().down) toggleDir(); else moveOne(1, 0); return;
+  }
+});
+
+/* On-screen keyboards often don't send real keydown events, so mirror the
+   typing through a hidden input as well. A sentinel character sits in the
+   field so that a delete on an "empty" field still registers. */
+const SENTINEL = "\u00A0";
+hidden.addEventListener("input", () => {
+  const v = hidden.value;
+  hidden.value = SENTINEL;
+  try { hidden.setSelectionRange(1, 1); } catch (e) {}
+  if (v.length === 0) { backspace(); return; }
+  for (const ch of v.replace(SENTINEL, "")) {
+    if (/[a-zA-Z]/.test(ch)) typeLetter(ch.toUpperCase());
+  }
+});
+
+/* ==================================================================
+   10. Firebase sync
+================================================================== */
+function applyRemote(k, val) {
+  if (val) S.letters[k] = val; else delete S.letters[k];
+  delete S.wrong[k];
+  const [r, c] = k.split("_").map(Number);
+  if (M.cells[r] && M.cells[r][c]) paintCell(M.cells[r][c]);
+  if (S.ready) { paint(); checkSolved(); }
+}
+
+cellsRef.on("child_added",   s => applyRemote(s.key, s.val()));
+cellsRef.on("child_changed", s => applyRemote(s.key, s.val()));
+cellsRef.on("child_removed", s => applyRemote(s.key, null));
+
+revealedRef.on("value", s => {
+  S.revealed = s.val() || {};
+  if (S.ready) paint();
+});
+
+metaRef.on("value", s => {
+  const m = s.val() || {};
+  S.startedAt = m.startedAt || null;
+  const wasSolved = S.solvedAt;
+  S.solvedAt = m.solvedAt || null;
+  if (S.solvedAt && !wasSolved) showSolved();
+  if (!S.solvedAt) { S.modalShown = false; scrim.classList.remove("open"); }
+});
+
+playersRef.on("value", s => {
+  S.players = s.val() || {};
+  if (S.ready) paint();
+});
+
+cellsRef.once("value").then(() => {
+  S.ready = true;
+  statusEl.textContent = "Synced";
+  // start on the first square of 1-Across (or the first entry there is)
+  const first = M.order[0];
+  if (first) select(first.cells[0].r, first.cells[0].c, first.dir);
+  paint();
+  checkSolved();
+  setTimeout(() => { if (statusEl.textContent === "Synced") statusEl.textContent = ""; }, 2500);
+}).catch(dbError);
+
+db.ref(".info/connected").on("value", s => {
+  if (!s.val()) statusEl.textContent = "Offline — reconnecting…";
+  else if (S.ready) statusEl.textContent = "";
+});
+
+/* ---- presence ---- */
+let presenceTimer = null;
+function pushPresence() {
+  meRef.set({
+    name: me.name, color: me.color,
+    r: S.cur.r, c: S.cur.c, dir: S.cur.dir,
+    ts: firebase.database.ServerValue.TIMESTAMP
+  }).catch(() => {});
+}
+function queuePresence() {
+  if (presenceTimer) return;
+  presenceTimer = setTimeout(() => { presenceTimer = null; pushPresence(); }, 200);
+}
+meRef.onDisconnect().remove();
+pushPresence();
+setInterval(pushPresence, 25000);
+window.addEventListener("beforeunload", () => { meRef.remove(); });
+
+/* ---- shared timer ---- */
+function fmt(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(t / 60), s = t % 60;
+  return m + ":" + String(s).padStart(2, "0");
+}
+setInterval(() => {
+  if (!S.startedAt) { timerEl.textContent = "0:00"; return; }
+  const end = S.solvedAt || serverNow();
+  timerEl.textContent = fmt(end - S.startedAt);
+}, 250);
+
+function showSolved() {
+  if (S.modalShown) return;
+  S.modalShown = true;
+  const solvers = Object.values(S.players).map(p => p && p.name).filter(Boolean);
+  document.getElementById("solvedWho").textContent =
+    solvers.length > 1 ? "Solved by " + solvers.join(" and ") + "." : "Nice work.";
+  document.getElementById("solvedTime").textContent =
+    S.startedAt && S.solvedAt ? fmt(S.solvedAt - S.startedAt) : "";
+  scrim.classList.add("open");
+}
+
+focusHidden();
+} // end start()
+</script>
+</body>
+</html>

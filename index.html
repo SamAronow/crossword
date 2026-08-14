@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossword</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#121212;
+    --muted:#6b6b6b;
+    --line:#dcdcdc;
+    --select:#ffda00;
+    --highlight:#a7d8ff;
+    --font:"Libre Franklin","Franklin Gothic Medium","Helvetica Neue",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--font);color:var(--ink);background:#fff;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px;margin:0 auto;padding:0 20px 64px}
+
+  header.masthead{
+    border-bottom:1px solid var(--ink);
+    padding:36px 0 18px;margin-bottom:26px;text-align:center;
+  }
+  .wordmark{
+    font-weight:700;font-size:clamp(30px,7vw,44px);
+    letter-spacing:.14em;text-transform:uppercase;margin:0;
+  }
+  .tagline{margin:10px 0 0;font-size:13px;letter-spacing:.05em;color:var(--muted)}
+  .you{margin-top:16px;font-size:13px;color:var(--muted)}
+  .you input{
+    font-family:var(--font);font-size:13px;font-weight:600;color:var(--ink);
+    border:none;border-bottom:1px dashed var(--line);background:transparent;
+    padding:2px;width:11ch;text-align:center;
+  }
+  .you input:focus{outline:none;border-bottom-color:var(--ink)}
+
+  .listhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+  h2.section{
+    font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;margin:0;
+  }
+  .add{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none}
+  .add:hover{text-decoration:underline}
+
+  ul.puzzles{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+  li.puzzle{border-bottom:1px solid var(--line)}
+  a.card{
+    display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;
+    padding:18px 4px;text-decoration:none;color:inherit;
+  }
+  a.card:hover .title{text-decoration:underline}
+  a.card:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+  .thumb{display:grid;gap:1px;background:#000;border:1px solid #000;width:52px;height:52px}
+  .thumb i{background:#fff}
+  .thumb i.b{background:#000}
+
+  .title{font-weight:600;font-size:18px;margin:0 0 3px;display:block}
+  .meta{font-size:13px;color:var(--muted);display:block}
+  .status{text-align:right;font-size:12px;color:var(--muted);min-width:104px}
+  .bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:6px}
+  .bar span{display:block;height:100%;background:var(--select);width:0%}
+  .solved{color:#0a7d33;font-weight:600}
+  .live{display:inline-flex;align-items:center;gap:5px;color:#1a6ec4;font-weight:600}
+  .dot{width:6px;height:6px;border-radius:50%;background:#1a6ec4;display:inline-block}
+
+  .empty{
+    border:1px dashed var(--line);border-radius:8px;
+    padding:34px 24px;text-align:center;color:var(--muted);font-size:14px;line-height:1.6;
+  }
+  .empty a.cta{
+    display:inline-block;margin-top:14px;background:var(--ink);color:#fff;
+    text-decoration:none;font-weight:600;font-size:14px;padding:10px 20px;border-radius:20px;
+  }
+  .note{
+    margin-top:28px;font-size:13px;line-height:1.55;color:var(--muted);
+    border-left:3px solid var(--highlight);padding-left:14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <h1 class="wordmark">Crossword</h1>
+    <p class="tagline">Solve together, in real time</p>
+    <p class="you">You're solving as <input id="nameInput" maxlength="16" aria-label="Your name"></p>
+  </header>
+
+  <div class="listhead">
+    <h2 class="section">Puzzles</h2>
+    <a class="add" href="new.html">Add a puzzle &rarr;</a>
+  </div>
+
+  <div id="mount"><p class="status">Loading&hellip;</p></div>
+
+  <p class="note">
+    Open a puzzle and send the link to anyone. Every letter typed shows up on
+    everyone's screen as it's typed, and the grid is waiting exactly as you left
+    it whenever you come back.
+  </p>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="crossword-core.js"></script>
+<script>
+const me = loadSolver();
+
+const nameInput = document.getElementById("nameInput");
+nameInput.value = me.name;
+nameInput.addEventListener("change", () => {
+  const v = nameInput.value.trim() || me.name;
+  nameInput.value = v;
+  saveSolverName(v);
+});
+
+const mount = document.getElementById("mount");
+
+function openSquares(grid) {
+  let n = 0;
+  grid.forEach(row => { for (const ch of row) if (ch !== ".") n++; });
+  return n;
+}
+
+function render(puzzles) {
+  if (!puzzles.length) {
+    mount.innerHTML = `
+      <div class="empty">
+        Nothing in the database yet.
+        <br>The new puzzle page opens with a sample mini already filled in &mdash;
+        one click puts it in and you can start solving.
+        <br><a class="cta" href="new.html">Add the sample puzzle</a>
+      </div>`;
+    return;
+  }
+
+  const ul = document.createElement("ul");
+  ul.className = "puzzles";
+  mount.innerHTML = "";
+  mount.appendChild(ul);
+
+  puzzles.forEach(p => {
+    const total = openSquares(p.grid);
+    const cols = p.grid[0].length;
+
+    const li = document.createElement("li");
+    li.className = "puzzle";
+    li.innerHTML = `
+      <a class="card" href="puzzle.html?id=${encodeURIComponent(p.id)}">
+        <span class="thumb" style="grid-template-columns:repeat(${cols},1fr)"></span>
+        <span>
+          <span class="title"></span>
+          <span class="meta"></span>
+        </span>
+        <span class="status">
+          <span class="statusText">&mdash;</span>
+          <span class="bar"><span class="fill"></span></span>
+        </span>
+      </a>`;
+
+    li.querySelector(".title").textContent = p.title;
+    li.querySelector(".meta").textContent =
+      [p.grid.length + "\u00d7" + cols, p.difficulty, p.byline].filter(Boolean).join(" \u00b7 ");
+
+    const thumb = li.querySelector(".thumb");
+    p.grid.forEach(row => {
+      for (const ch of row) {
+        const i = document.createElement("i");
+        if (ch === ".") i.className = "b";
+        thumb.appendChild(i);
+      }
+    });
+
+    ul.appendChild(li);
+
+    const statusText = li.querySelector(".statusText");
+    const fill = li.querySelector(".fill");
+
+    // Live progress: how much is filled in, and who's in there right now.
+    solveRef(p.id).on("value", snap => {
+      const data = snap.val() || {};
+      const filled = Object.keys(data.cells || {}).length;
+      const players = data.players || {};
+      const here = Object.values(players).filter(pl => pl && serverNow() - (pl.ts || 0) < 90000).length;
+
+      fill.style.width = Math.round((filled / total) * 100) + "%";
+
+      if (data.meta && data.meta.solvedAt) {
+        statusText.innerHTML = `<span class="solved">Solved</span>`;
+        fill.style.background = "#0a7d33";
+      } else if (here > 0) {
+        statusText.innerHTML = `<span class="live"><span class="dot"></span>${here} solving now</span>`;
+      } else if (filled > 0) {
+        statusText.textContent = filled + " of " + total + " filled";
+      } else {
+        statusText.textContent = "Not started";
+      }
+    }, err => { statusText.textContent = "Offline"; console.error(err); });
+  });
+}
+
+// The list is live too — add a puzzle in another tab and it shows up here.
+allPuzzlesRef().on("value", snap => {
+  const raw = snap.val() || {};
+  const puzzles = Object.keys(raw)
+    .map(id => normalizePuzzle(id, raw[id]))
+    .filter(p => p && !gridProblem(p.grid))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || a.title.localeCompare(b.title));
+  render(puzzles);
+}, err => {
+  console.error(err);
+  mount.innerHTML = `<div class="empty">Can't reach the database. Check the config in
+    firebase-config.js and your database rules.</div>`;
+});
+</script>
+</body>
+</html>
