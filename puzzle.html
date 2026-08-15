@@ -153,6 +153,20 @@
     border-top:calc(var(--cell)*.2) solid var(--reveal);
     border-left:calc(var(--cell)*.2) solid transparent;
   }
+  /* Confirmed correct: the letter goes blue-black and the square is frozen. */
+  .cell.locked .ltr{color:#1a3a6b}
+  .cell.locked::before{
+    content:"";position:absolute;left:0;bottom:0;
+    width:100%;height:2px;background:#1a6ec4;opacity:.55;
+  }
+  .cell.revealed .ltr{color:var(--reveal)}
+  .cell.revealed::before{background:var(--reveal)}
+  .cell.nudge{animation:nudge .35s ease}
+  @keyframes nudge{
+    0%,100%{transform:translateX(0)}
+    25%{transform:translateX(-2px)}
+    75%{transform:translateX(2px)}
+  }
   .cell.wrong::before{
     content:"";position:absolute;inset:0;
     background:linear-gradient(to top right,
@@ -323,7 +337,8 @@ const M = buildModel(puzzle);
 const S = {
   letters: {},    // "r_c" -> {l, by, cl}   (shared)
   revealed: {},   // "r_c" -> true          (shared)
-  wrong: {},      // "r_c" -> true          (this browser only)
+  locked: {},     // "r_c" -> true          (shared) checked correct — frozen
+  wrong: {},      // "r_c" -> true          (shared) checked wrong
   players: {},    // id -> {name,color,r,c,dir,ts}
   startedAt: null,
   solvedAt: null,
@@ -338,6 +353,14 @@ const letterAt = cell => (S.letters[key(cell.r, cell.c)] || {}).l || "";
 const pRef        = roomRef(roomCode);
 const cellsRef    = pRef.child("cells");
 const revealedRef = pRef.child("revealed");
+const lockedRef   = pRef.child("locked");
+const wrongRef    = pRef.child("wrong");
+
+/* A square is frozen once it's been confirmed correct or revealed: nobody can
+   type over it, delete it, or clear it away. Rooms from before this existed
+   only have `revealed`, so that counts as locked too. */
+const isLocked = k => !!(S.locked[k] || S.revealed[k]);
+const cellLocked = (r, c) => isLocked(key(r, c));
 const metaRef     = pRef.child("meta");
 const playersRef  = pRef.child("players");
 const meRef       = playersRef.child(me.id);
@@ -499,8 +522,9 @@ function paintCell(cell) {
   ltr.textContent = rec ? rec.l : "";
   ltr.style.color = !rec ? "" : (rec.by === me.id ? "" : (rec.cl || "#1a6ec4"));
   el.classList.toggle("revealed", !!S.revealed[k]);
+  el.classList.toggle("locked", isLocked(k));
   el.classList.toggle("wrong", !!S.wrong[k]);
-  if (S.revealed[k]) ltr.style.color = "";
+  if (isLocked(k)) ltr.style.color = "";
 }
 
 function paint() {
@@ -624,6 +648,7 @@ function ensureStarted() {
 
 function writeLetter(r, c, letter) {
   const k = key(r, c);
+  if (isLocked(k)) return false;
   const updates = {};
   if (letter) {
     updates["cells/" + k] = { l: letter, by: me.id, cl: me.color, at: firebase.database.ServerValue.TIMESTAMP };
@@ -636,27 +661,47 @@ function writeLetter(r, c, letter) {
     delete S.letters[k];
     delete S.revealed[k];
   }
+  updates["wrong/" + k] = null;     // a changed letter isn't wrong yet, it's unchecked
   delete S.wrong[k];
   paintCell(M.cells[r][c]);
   pRef.update(updates).catch(dbError);
   checkSolved();
+  return true;
 }
 
 function typeLetter(ch) {
   if (S.solvedAt) return;
+  if (cellLocked(S.cur.r, S.cur.c)) {   // confirmed square — step over it
+    nudge(S.cur.r, S.cur.c);
+    advanceAfterType();
+    return;
+  }
   ensureStarted();
   writeLetter(S.cur.r, S.cur.c, ch);
   advanceAfterType();
 }
 
+/* A short flash, so a refused keystroke doesn't just feel like a dead key. */
+function nudge(r, c) {
+  const el = M.cells[r][c].el;
+  el.classList.remove("nudge");
+  void el.offsetWidth;
+  el.classList.add("nudge");
+  setTimeout(() => el.classList.remove("nudge"), 400);
+}
+
 function backspace() {
   if (S.solvedAt) return;
   const k = key(S.cur.r, S.cur.c);
-  if (S.letters[k]) {
+  if (isLocked(k)) {            // can't delete a confirmed square — just move off it
+    nudge(S.cur.r, S.cur.c);
+    stepBackInEntry();
+  } else if (S.letters[k]) {
     writeLetter(S.cur.r, S.cur.c, null);
     stepBackInEntry();
   } else if (stepBackInEntry()) {
-    writeLetter(S.cur.r, S.cur.c, null);
+    if (cellLocked(S.cur.r, S.cur.c)) nudge(S.cur.r, S.cur.c);
+    else writeLetter(S.cur.r, S.cur.c, null);
   }
   paint();
 }
@@ -686,24 +731,38 @@ function scopeCells(scope) {
 }
 
 function doCheck(scope) {
+  const updates = {};
   scopeCells(scope).forEach(cell => {
     const k = key(cell.r, cell.c);
     const l = letterAt(cell);
-    if (!l) return;
-    if (l !== cell.solution) S.wrong[k] = true; else delete S.wrong[k];
+    if (!l || isLocked(k)) return;
+    if (l === cell.solution) {
+      updates["locked/" + k] = true;    // confirmed correct — frozen from here on
+      updates["wrong/" + k] = null;
+      S.locked[k] = true; delete S.wrong[k];
+    } else {
+      updates["wrong/" + k] = true;
+      S.wrong[k] = true;
+    }
     paintCell(cell);
   });
+  if (!Object.keys(updates).length) return;
+  pRef.update(updates).catch(dbError);
+  paint();
 }
 
 function doReveal(scope) {
   const updates = {};
   scopeCells(scope).forEach(cell => {
     const k = key(cell.r, cell.c);
-    if (letterAt(cell) === cell.solution) return;
+    if (isLocked(k) || letterAt(cell) === cell.solution) return;
     updates["cells/" + k] = { l: cell.solution, by: me.id, cl: me.color, at: firebase.database.ServerValue.TIMESTAMP };
     updates["revealed/" + k] = true;
+    updates["locked/" + k] = true;
+    updates["wrong/" + k] = null;
     S.letters[k] = { l: cell.solution, by: me.id, cl: me.color };
     S.revealed[k] = true;
+    S.locked[k] = true;
     delete S.wrong[k];
   });
   if (!Object.keys(updates).length) return;
@@ -714,14 +773,19 @@ function doReveal(scope) {
 }
 
 function doClear(scope) {
-  const label = scope === "puzzle" ? "Clear the whole puzzle for everyone?" : "Clear this word for everyone?";
+  const frozen = scopeCells(scope).filter(cell => isLocked(key(cell.r, cell.c))).length;
+  const note = frozen ? `\n\n${frozen} confirmed square${frozen === 1 ? "" : "s"} will stay.` : "";
+  const label = (scope === "puzzle" ? "Clear the whole puzzle for everyone?" : "Clear this word for everyone?") + note;
   if (!confirm(label)) return;
   const updates = {};
+  let kept = 0;
   scopeCells(scope).forEach(cell => {
     const k = key(cell.r, cell.c);
+    if (isLocked(k)) { kept++; return; }   // confirmed squares survive a clear
     updates["cells/" + k] = null;
     updates["revealed/" + k] = null;
-    delete S.letters[k]; delete S.revealed[k]; delete S.wrong[k];
+    updates["wrong/" + k] = null;
+    delete S.letters[k]; delete S.wrong[k];
   });
   if (scope === "puzzle") {
     updates["meta/startedAt"] = null;      // never clear meta itself — it holds
@@ -802,7 +866,10 @@ window.addEventListener("keydown", e => {
 
   switch (k) {
     case "Backspace": e.preventDefault(); backspace(); return;
-    case "Delete":    e.preventDefault(); writeLetter(S.cur.r, S.cur.c, null); paint(); return;
+    case "Delete":    e.preventDefault();
+      if (cellLocked(S.cur.r, S.cur.c)) nudge(S.cur.r, S.cur.c);
+      else writeLetter(S.cur.r, S.cur.c, null);
+      paint(); return;
     case " ":         e.preventDefault(); toggleDir(); return;
     case "Enter":     e.preventDefault(); toggleDir(); return;
     case "Tab":       e.preventDefault(); gotoEntry(e.shiftKey ? -1 : 1, false); return;
@@ -836,7 +903,6 @@ hidden.addEventListener("input", () => {
 ================================================================== */
 function applyRemote(k, val) {
   if (val) S.letters[k] = val; else delete S.letters[k];
-  delete S.wrong[k];
   const [r, c] = k.split("_").map(Number);
   if (M.cells[r] && M.cells[r][c]) paintCell(M.cells[r][c]);
   if (S.ready) { paint(); checkSolved(); }
@@ -848,6 +914,16 @@ cellsRef.on("child_removed", s => applyRemote(s.key, null));
 
 revealedRef.on("value", s => {
   S.revealed = s.val() || {};
+  if (S.ready) paint();
+});
+
+lockedRef.on("value", s => {
+  S.locked = s.val() || {};
+  if (S.ready) paint();
+});
+
+wrongRef.on("value", s => {
+  S.wrong = s.val() || {};
   if (S.ready) paint();
 });
 
