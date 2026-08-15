@@ -9,8 +9,8 @@ index.html             home page — lists whatever puzzles are in the database
 rooms.html?id=...      start a room, or type in someone's code
 puzzle.html?room=...   the solver, for one room
 new.html               build and save a puzzle (opens with the sample filled in)
-add-puzzles.html       (re)load every puzzle this app ships with, one click
-add-puzzles.js         those puzzles' grids and clues
+add-puzzles.html       one button: adds whatever is queued in add-puzzles.js
+add-puzzles.js         the queue — paste puzzle JSON here
 crossword-core.js      record shape, grid validation, square numbering
 firebase-config.js     your Firebase config + the database paths
 ```
@@ -43,9 +43,10 @@ the URL. If you ever want it tighter, the usual move is anonymous auth plus
 `".write": "auth != null"`.
 
 **3. Serve the folder** — `python3 -m http.server 8000` — and open
-`http://localhost:8000/add-puzzles.html`. One click loads the four puzzles and
-you're solving. Opening the files directly with `file://` mostly works, but a
-local server behaves more like the real thing.
+`http://localhost:8000`. Make a puzzle in `new.html`, or queue some in
+`add-puzzles.js` and press the button on `add-puzzles.html`. Opening the files
+directly with `file://` mostly works, but a local server behaves more like the
+real thing.
 
 For solving with someone on another computer, push the folder to a repo and
 deploy to Vercel. It's all static; there's nothing to configure.
@@ -87,6 +88,8 @@ crossword/
     meta:           { puzzleId, createdAt, createdBy, startedAt, solvedAt }
     cells/2_3:      { l: "O", by: "s8fk2a", cl: "#7c3aed", at: 1723… }
     revealed/2_3:   true
+    locked/2_3:     true          confirmed correct — frozen
+    wrong/2_3:      true          checked and wrong
     players/s8fk2a: { name, color, r, c, dir, ts }
 ```
 
@@ -114,29 +117,67 @@ come back to life.
 
 ## Adding puzzles
 
-**`add-puzzles.html`** loads everything the app ships with: the 5×5 sample plus
-three original 11×11 easies. It verifies each one first — usable grid, a clue on
-every entry, no clue numbered for an entry that doesn't exist — and shows the
-numbered grid and clue list so you can see what you're adding. Re-running it
-overwrites the puzzle records only; rooms and anything typed into them are
-untouched. Use it to refill an empty database or seed a fresh Firebase project.
-
-**`new.html`** is for puzzles of your own. Type or paste a grid and the numbered
-preview and one clue field per entry — each labelled with its answer — appear as
-you type. Square numbers are computed from the grid and never stored, which is
-why you never number clues by hand. It refuses to save ragged rows and warns
-about empty clues. Any rectangle works; 15×15 is the same data shape as 5×5.
+**`new.html`** is the builder. Type or paste a grid and the numbered preview and
+one clue field per entry — each labelled with its answer — appear as you type.
+Square numbers are computed from the grid and never stored, which is why you
+never number clues by hand. It refuses to save ragged rows and warns about empty
+clues. Any rectangle works; 15×15 is the same data shape as 5×5.
 
 In a grid, a letter is that square's answer and `.` is a black square.
 
-To load a batch of your own, copy the shape of `add-puzzles.js`.
+**`add-puzzles.html`** is the bulk route: paste puzzle JSON objects into the
+`QUEUED` array in `add-puzzles.js` and press the button.
 
-A note on the shipped puzzles: published crosswords are copyrighted, grid and
-clues both, so these are constructed rather than borrowed. The grids are
-machine-filled from a ~13,000-word pool of common English — proper nouns and
-abbreviations filtered out — and then hand-clued. They follow the usual
-conventions: 180-degree symmetry, nothing shorter than three letters, every
-square crossed in both directions, no 2×2 blocks of black.
+Each queued puzzle gets an **editable name field**, defaulting to the first
+unused `Puzzle N` — it skips numbers already in the database. The id is slugged
+from whatever you type (`Sunday Themer` → `sunday-themer`), shown live under the
+field, and flagged if it would replace an existing puzzle. The title from the
+file, if there is one, is shown underneath so you can copy it.
+
+An xword/NYT-style export can be pasted whole — one flat `grid` array with
+`size`, clues as `"1. Clue text"` strings, `answers` running parallel to them,
+`author` and `dow` becoming byline and difficulty, and `circles` kept and drawn
+as rings in the grid the way a printed puzzle does. The hand-written shape also works —
+
+```js
+{
+  id: "step-by-step",            // optional: falls back to a slug of the
+  title: "Thursday Themed",      // title, then to "puzzle-1", "puzzle-2"…
+  grid: [
+    ["A","P","E","S","black"],   // "black" marks a black square
+    ...
+  ],
+  clues: {
+    across: [ { number: 1, clue: "\"Planet of the ___\"", answer: "APES" }, … ],
+    down:   [ { number: 1, clue: "Spanish love",          answer: "AMOR" }, … ]
+  }
+}
+```
+
+The oldest shape works too — `grid` as an array of strings, `clues` as plain
+objects keyed by number. Mixing shapes in one queue is fine.
+
+**Renaming.** Hover a puzzle on the home page and a Rename button appears; the
+title becomes an editable field, Enter saves and Escape cancels. Only the title
+changes — the id stays put, so existing links and rooms keep working.
+
+Each queued puzzle is checked before anything is written, and the page shows a
+tick or a cross per entry with the reason:
+
+- the grid has to be rectangular
+- every entry needs a clue
+- a clue numbered for an entry that doesn't exist is an error, not a warning —
+  it means the grid and the clue list disagree
+- `answer`, if present, has to match the letters in the grid (`1A says RIB,
+  grid has RUB`)
+
+That last one is the reason to keep the answers in the JSON: it catches a
+mis-transcribed row before it becomes a puzzle nobody can solve. Answers aren't
+stored — they're already in the grid.
+
+A puzzle that fails is skipped, not fatal; the good ones still go in. Adding is
+idempotent — same id means overwrite, and anything typed into a room is
+untouched — so entries can sit in the queue harmlessly.
 
 ## Keyboard (NYT behaviour)
 
@@ -151,8 +192,35 @@ square crossed in both directions, no 2×2 blocks of black.
 | Tab / Shift-Tab | Next / previous clue, landing on its first empty square |
 | Click a square | Selects it; clicking it again flips direction |
 
-Check marks are per-browser — your red slashes are yours. Reveal and Clear are
-shared, since they change the grid everyone is looking at.
+## Checking, and frozen squares
+
+Check, Reveal and Clear are all shared — everyone in the room is looking at one
+grid, so a check on your phone shows up on your friend's laptop without them
+touching anything.
+
+Checking a square has consequences beyond a red slash:
+
+- **Correct → frozen.** The letter turns blue and can't be typed
+  over, backspaced, deleted, or cleared by anyone, on any device. A refused
+  keystroke gives the square a small shake so it doesn't read as a dead key, and
+  the cursor moves on past it.
+- **Wrong → red slash**, and the square stays editable. The mark clears itself
+  the moment the letter changes, on every device.
+- **Revealed squares are frozen too**, and read the same blue, with a red flag
+  in the corner marking them as given rather than earned.
+
+Solver colours deliberately skip blue, since blue now means "confirmed
+correct" — a teammate's letters would otherwise look like checked ones. Anyone
+whose browser is holding a blue from an earlier version gets moved to a new
+colour on their next visit.
+
+Clear skips frozen squares and says how many it's keeping before you confirm.
+The upshot is that progress you've confirmed is progress: nobody can undo it by
+leaning on a key, and Clear puzzle won't wipe out an hour of correct work.
+
+There's deliberately no unfreeze button. If you truly need one — a puzzle
+entered with a typo in its answers, say — delete `locked` under that room in the
+Firebase console, or delete the room and start a fresh one.
 
 ## When something's wrong
 
@@ -172,12 +240,14 @@ Network tab.
 **"No room with that code."** Codes are five characters and never contain `O`,
 `0`, `I`, or `1`. The room may also have been deleted from the console.
 
-**A room's puzzle went missing.** Re-add the puzzle with `add-puzzles.html` (or
-`new.html`, under the same id) and the room works again with its letters intact.
+**A room's puzzle went missing.** Re-add the puzzle under the same id — via
+`new.html`, or by queueing it in `add-puzzles.js` — and the room works again with
+its letters intact.
 
 **Starting over.** Delete `crossword/rooms` in the Firebase console to clear
 every grid while keeping the puzzles. Delete `crossword` entirely to reset the
-whole thing, then run `add-puzzles.html` again.
+whole thing — but note the puzzles only live in the database now, so anything not
+sitting in the queue would have to be rebuilt.
 
 ## Known limits
 

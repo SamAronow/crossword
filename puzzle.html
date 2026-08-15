@@ -16,6 +16,7 @@
     --highlight:#a7d8ff;
     --cluebar:#dce9f7;
     --reveal:#c8102e;
+    --confirmed:#2160c4;
     --font:"Libre Franklin","Franklin Gothic Medium","Helvetica Neue",Helvetica,Arial,sans-serif;
     --cell:56px;
   }
@@ -142,25 +143,30 @@
   .cell.hl{background:var(--highlight)}
   .cell.sel{background:var(--select)}
   .cell .num{
-    position:absolute;top:2px;left:3px;
-    font-size:calc(var(--cell)*.24);font-weight:400;line-height:1;
+    position:absolute;top:1px;left:2px;
+    font-size:calc(var(--cell)*.30);font-weight:400;line-height:1;
     pointer-events:none;
   }
   .cell .ltr{pointer-events:none;padding-top:calc(var(--cell)*.09)}
-  .cell.revealed .ltr{color:var(--reveal)}
+
+  /* A circled square, the way a printed crossword draws it: a thin ring
+     inside the square that sits under the letter and the highlighting. */
+  .cell .circ{
+    content:"";position:absolute;inset:5%;
+    border:1px solid #6b6b6b;border-radius:50%;
+    pointer-events:none;
+  }
+
+  /* Confirmed correct — checked and right, or revealed — reads blue.
+     Revealed squares also carry the red corner flag; checked ones don't. */
+  .cell.locked .ltr{color:var(--confirmed)}
+  .cell.revealed .ltr{color:var(--confirmed)}
   .cell.revealed::after{
     content:"";position:absolute;top:0;right:0;
     border-top:calc(var(--cell)*.2) solid var(--reveal);
     border-left:calc(var(--cell)*.2) solid transparent;
   }
-  /* Confirmed correct: the letter goes blue-black and the square is frozen. */
-  .cell.locked .ltr{color:#1a3a6b}
-  .cell.locked::before{
-    content:"";position:absolute;left:0;bottom:0;
-    width:100%;height:2px;background:#1a6ec4;opacity:.55;
-  }
-  .cell.revealed .ltr{color:var(--reveal)}
-  .cell.revealed::before{background:var(--reveal)}
+
   .cell.nudge{animation:nudge .35s ease}
   @keyframes nudge{
     0%,100%{transform:translateX(0)}
@@ -223,8 +229,11 @@
   .modal button.ghost{background:#fff;color:var(--ink)}
 
   #hidden{
-    position:absolute;opacity:0;height:1px;width:1px;padding:0;border:0;
-    font-size:16px;left:0;top:0;
+    position:absolute;left:0;top:0;
+    height:1px;width:1px;padding:0;margin:0;border:0;outline:none;
+    font-size:16px;                 /* under 16px makes iOS zoom on focus */
+    color:transparent;background:transparent;caret-color:transparent;
+    -webkit-appearance:none;appearance:none;
   }
 
   .missing{padding:60px 20px;text-align:center}
@@ -445,6 +454,9 @@ const timerEl  = document.getElementById("timer");
 const whoEl    = document.getElementById("who");
 const scrim    = document.getElementById("scrim");
 
+/* Squares the puzzle wants circled — some themes are unreadable without them. */
+const circledSet = new Set(puzzle.shaded || []);
+
 /* ---- draw the grid once ---- */
 gridEl.style.gridTemplateColumns = `repeat(${M.cols}, 1fr)`;
 for (let r = 0; r < M.rows; r++) {
@@ -456,6 +468,11 @@ for (let r = 0; r < M.rows; r++) {
     if (!cell.black) {
       el.setAttribute("role", "gridcell");
       el.innerHTML = `<span class="num">${cell.number || ""}</span><span class="ltr"></span>`;
+      if (circledSet.has(key(r, c))) {      // after innerHTML, which would wipe it
+        const ring = document.createElement("span");
+        ring.className = "circ";
+        el.appendChild(ring);
+      }
     }
     cell.el = el;
     gridEl.appendChild(el);
@@ -520,7 +537,7 @@ function paintCell(cell) {
   const rec = S.letters[k];
   const ltr = el.querySelector(".ltr");
   ltr.textContent = rec ? rec.l : "";
-  ltr.style.color = !rec ? "" : (rec.by === me.id ? "" : (rec.cl || "#1a6ec4"));
+  ltr.style.color = !rec ? "" : (rec.by === me.id ? "" : (rec.cl || "#7c3aed"));
   el.classList.toggle("revealed", !!S.revealed[k]);
   el.classList.toggle("locked", isLocked(k));
   el.classList.toggle("wrong", !!S.wrong[k]);
@@ -537,7 +554,7 @@ function paint() {
     if (id === me.id || !p) return;
     if (serverNow() - (p.ts || 0) > 90000) return;
     if (typeof p.r !== "number") return;
-    peers[key(p.r, p.c)] = p.color || "#1a6ec4";
+    peers[key(p.r, p.c)] = p.color || "#7c3aed";
   });
 
   M.openCells.forEach(cell => {
@@ -579,7 +596,7 @@ function renderWho() {
   list.slice(0, 5).forEach(([id, p]) => {
     const d = document.createElement("div");
     d.className = "chip";
-    d.style.background = p.color || "#666";
+    d.style.background = p.color || "#7c3aed";
     d.textContent = (p.name || "?").trim().slice(0, 2).toUpperCase();
     d.title = id === me.id ? (p.name + " (you)") : p.name;
     whoEl.appendChild(d);
@@ -819,16 +836,35 @@ document.addEventListener("click", e => {
 /* ==================================================================
    9. Input
 ================================================================== */
-gridEl.addEventListener("pointerdown", e => {
-  const el = e.target.closest(".cell");
-  if (!el) return;
-  e.preventDefault();
+/* Tapping a square has to move the cursor without ever letting the keyboard
+   close. preventDefault stops the browser blurring the input it's about to
+   re-focus; the touchend pass catches iOS, which sometimes blurs anyway after
+   the pointer sequence finishes. */
+let lastGridTap = 0;
+
+function tapCell(el) {
+  lastGridTap = Date.now();
   document.querySelectorAll(".menu").forEach(m => m.classList.remove("open"));
   const r = +el.dataset.r, c = +el.dataset.c;
   if (!isOpen(r, c)) return;
   if (r === S.cur.r && c === S.cur.c) toggleDir(); else select(r, c);
   focusHidden();
+}
+
+gridEl.addEventListener("pointerdown", e => {
+  const el = e.target.closest(".cell");
+  if (!el) return;
+  e.preventDefault();
+  tapCell(el);
 });
+
+gridEl.addEventListener("touchend", e => {
+  const el = e.target.closest(".cell");
+  if (!el) return;
+  e.preventDefault();          // also stops the double-tap-to-zoom gesture
+  lastGridTap = Date.now();
+  focusHidden();
+}, { passive: false });
 
 document.getElementById("prevClue").addEventListener("click", () => { gotoEntry(-1, false); focusHidden(); });
 document.getElementById("nextClue").addEventListener("click", () => { gotoEntry(1, false); focusHidden(); });
@@ -856,6 +892,19 @@ function focusHidden() {
   hidden.focus({ preventScroll: true });
   try { hidden.setSelectionRange(1, 1); } catch (e) {}
 }
+
+/* iOS sometimes blurs the input a moment after the tap that focused it, which
+   is the keyboard flashing open and shut. Take focus back — but only right
+   after a tap on the grid, so that tapping "Done", a clue, or a menu still
+   closes the keyboard the way you'd expect. */
+hidden.addEventListener("blur", () => {
+  if (Date.now() - lastGridTap > 700) return;
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (Date.now() - lastGridTap > 900) return;
+    if (!a || a === document.body || a === gridEl) focusHidden();
+  }, 30);
+});
 
 window.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;

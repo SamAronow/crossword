@@ -43,6 +43,8 @@ function normalizePuzzle(id, raw) {
     difficulty: raw.difficulty || "",
     grid,
     clues: { across: clues.across || {}, down: clues.down || {} },
+    // "r_c r_c …" — squares a puzzle wants shaded, which some themes depend on
+    shaded: typeof raw.shaded === "string" ? raw.shaded.split(/\s+/).filter(Boolean) : [],
     createdAt: raw.createdAt || null
   };
 }
@@ -54,6 +56,7 @@ function serializePuzzle(p) {
     difficulty: p.difficulty || "",
     grid: p.grid.join("\n"),
     clues: { across: p.clues.across || {}, down: p.clues.down || {} },
+    shaded: (p.shaded || []).join(" "),
     createdAt: p.createdAt || firebase.database.ServerValue.TIMESTAMP
   };
 }

@@ -58,7 +58,22 @@
     display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;
     padding:18px 4px;text-decoration:none;color:inherit;
   }
+  li.puzzle{position:relative}
   a.card:hover .title{text-decoration:underline}
+  .rename{
+    position:absolute;top:10px;right:2px;
+    background:none;border:0;padding:4px 8px;border-radius:12px;
+    font-family:var(--font);font-size:11px;font-weight:600;color:var(--muted);
+    cursor:pointer;opacity:0;
+  }
+  li.puzzle:hover .rename,.rename:focus{opacity:1}
+  .rename:hover{background:#f2f2f2;color:var(--ink)}
+  input.retitle{
+    font-family:var(--font);font-weight:600;font-size:18px;color:var(--ink);
+    border:1px solid var(--ink);border-radius:4px;padding:2px 6px;width:100%;
+    background:#fffdf0;
+  }
+  input.retitle:focus{outline:none}
   a.card:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 
   .thumb{display:grid;gap:1px;background:#000;border:1px solid #000;width:52px;height:52px}
@@ -198,7 +213,8 @@ function render(puzzles) {
           <span class="statusText">&mdash;</span>
           <span class="bar"><span class="fill"></span></span>
         </span>
-      </a>`;
+      </a>
+      <button type="button" class="rename">Rename</button>`;
 
     li.querySelector(".title").textContent = p.title;
     li.querySelector(".meta").textContent =
@@ -211,6 +227,45 @@ function render(puzzles) {
         if (ch === ".") i.className = "b";
         thumb.appendChild(i);
       }
+    });
+
+    // Rename in place. The id never changes, so links and rooms keep working.
+    li.querySelector(".rename").addEventListener("click", () => {
+      const titleEl = li.querySelector(".title");
+      if (li.querySelector(".retitle")) return;
+      const input = document.createElement("input");
+      input.className = "retitle";
+      input.type = "text";
+      input.value = p.title;
+      titleEl.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let settled = false;
+      const finish = save => {
+        if (settled) return;
+        settled = true;
+        const next = input.value.trim();
+        const span = document.createElement("span");
+        span.className = "title";
+        span.textContent = (save && next) ? next : p.title;
+        input.replaceWith(span);
+        if (save && next && next !== p.title) {
+          const before = p.title;
+          p.title = next;
+          puzzleRef(p.id).child("title").set(next).catch(err => {
+            console.error(err);
+            p.title = before;
+            span.textContent = before;
+            alert("Couldn't save that name — check your database rules.");
+          });
+        }
+      };
+      input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); finish(true); }
+        if (e.key === "Escape") { e.preventDefault(); finish(false); }
+      });
+      input.addEventListener("blur", () => finish(true));
     });
 
     ul.appendChild(li);

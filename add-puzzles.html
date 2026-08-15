@@ -37,7 +37,14 @@
   li .mark.ok{color:var(--good)}
   li .mark.err{color:var(--bad)}
   li .what{flex:1;min-width:0}
-  li .id{font-family:var(--mono);font-size:11px;color:var(--muted);display:block}
+  li .id{font-family:var(--mono);font-size:11px;color:var(--muted);display:block;margin-top:3px}
+  li .src{font-size:11px;color:var(--muted);display:block;font-style:italic}
+  li input.name{
+    font-family:var(--font);font-size:14px;font-weight:600;color:var(--ink);
+    width:100%;padding:5px 7px;background:#fff;
+    border:1px solid var(--line);border-radius:4px;
+  }
+  li input.name:focus{outline:none;border-color:var(--ink);background:#fffdf0}
   li .why{color:var(--bad);display:block}
   p.said{font-size:13px;line-height:1.6;color:var(--muted);margin:20px 0 0;min-height:20px}
   p.said.ok{color:var(--good);font-weight:600}
@@ -99,21 +106,90 @@ function answerMap(list) {
   return out;
 }
 
-function convert(entry, i) {
-  const rows = Array.isArray(entry.grid) && Array.isArray(entry.grid[0])
-    ? entry.grid.map(row => row.map(cellChar).join(""))
-    : (entry.grid || []).map(row => String(row).toUpperCase());
+/* Three grid shapes turn up:
+     rows of strings      ["APES.", …]
+     rows of arrays       [["A","P","E","S","black"], …]
+     one flat array       ["A","P","E","S",".", …]  with size:{rows,cols}
+*/
+function gridRows(entry) {
+  const g = entry.grid || [];
+  if (Array.isArray(g[0])) return g.map(row => row.map(cellChar).join(""));
 
-  const id = entry.id || slug(entry.title) || "puzzle-" + (i + 1);
+  const size = entry.size || {};
+  const cols = Number(size.cols), rows = Number(size.rows);
+  if (cols && rows && g.length === cols * rows) {
+    const out = [];
+    for (let r = 0; r < rows; r++) out.push(g.slice(r * cols, r * cols + cols).map(cellChar).join(""));
+    return out;
+  }
+  return g.map(row => String(row).toUpperCase());
+}
+
+/* Clues arrive three ways too: {number, clue} objects, a plain map keyed by
+   number, or strings with the number baked in ("1. One side of a showdown").
+   In that last form the answers list runs parallel to the clue list. */
+function clueMap(list) {
+  const out = {};
+  if (Array.isArray(list)) {
+    list.forEach(c => {
+      if (typeof c === "string") {
+        const m = c.match(/^\s*(\d+)\s*[.:]?\s*([\s\S]*)$/);
+        if (m) out[m[1]] = m[2].trim();
+      } else if (c && c.number != null) {
+        out[c.number] = c.clue || "";
+      }
+    });
+  } else if (list && typeof list === "object") {
+    Object.entries(list).forEach(([n, c]) => { out[n] = c; });
+  }
+  return out;
+}
+
+function answerMap(clueList, answerList) {
+  const out = {};
+  if (Array.isArray(clueList) && Array.isArray(answerList)) {
+    clueList.forEach((c, i) => {
+      const n = typeof c === "string" ? (c.match(/^\s*(\d+)/) || [])[1] : (c && c.number);
+      if (n != null && answerList[i]) out[n] = String(answerList[i]).toUpperCase();
+    });
+  }
+  if (Array.isArray(clueList)) clueList.forEach(c => {
+    if (c && typeof c === "object" && c.number != null && c.answer) out[c.number] = String(c.answer).toUpperCase();
+  });
+  return out;
+}
+
+/* Circled/shaded squares — some themes are unreadable without them. */
+function shadedKeys(entry, rows) {
+  const marks = entry.circles || entry.shadecircles === true && entry.circles;
+  if (!Array.isArray(marks) || !rows.length) return [];
+  const cols = rows[0].length;
+  const out = [];
+  marks.forEach((v, i) => {
+    if (!v) return;
+    const r = Math.floor(i / cols), c = i % cols;
+    if (rows[r] && rows[r][c] && rows[r][c] !== ".") out.push(r + "_" + c);
+  });
+  return out;
+}
+
+function convert(entry, i) {
+  const rows = gridRows(entry);
   const clues = entry.clues || {};
+  const answers = entry.answers || {};
+  const sourceTitle = entry.title || "";
   return {
-    id,
-    title: entry.title || id,
-    byline: entry.byline || "",
-    difficulty: entry.difficulty || "",
+    sourceTitle,
+    byline: entry.byline || entry.author || "",
+    difficulty: entry.difficulty || entry.dow || "",
     grid: rows,
     clues: { across: clueMap(clues.across), down: clueMap(clues.down) },
-    answers: { across: answerMap(clues.across), down: answerMap(clues.down) }
+    answers: {
+      across: answerMap(clues.across, answers.across),
+      down: answerMap(clues.down, answers.down)
+    },
+    shaded: shadedKeys(entry, rows),
+    givenId: entry.id || ""
   };
 }
 
@@ -154,7 +230,84 @@ function check(p) {
 
 /* ---------- page ---------- */
 
-let ready = [];
+let rows = [];
+let taken = new Set();
+
+function nameField(row, i) {
+  const input = document.createElement("input");
+  input.className = "name";
+  input.type = "text";
+  input.value = row.name;
+  input.setAttribute("aria-label", "Name for queued puzzle " + (i + 1));
+  input.addEventListener("input", () => {
+    row.name = input.value;
+    row.id = slug(input.value) || row.fallbackId;
+    row.el.querySelector(".id").textContent = row.id + " \u00b7 " +
+      row.p.grid.length + "\u00d7" + row.p.grid[0].length +
+      (taken.has(row.id) ? " \u00b7 replaces an existing puzzle" : "");
+  });
+  return input;
+}
+
+async function boot() {
+  // Existing ids, so the default name is the first one not in use.
+  try {
+    const snap = await allPuzzlesRef().once("value");
+    taken = new Set(Object.keys(snap.val() || {}));
+  } catch (err) { console.error(err); }
+
+  let n = 0;
+  const nextName = () => {
+    do { n++; } while (taken.has("puzzle-" + n) || rows.some(r => r.id === "puzzle-" + n));
+    return "Puzzle " + n;
+  };
+
+  rows = QUEUED.map((entry, i) => {
+    let p, why;
+    try { p = convert(entry, i); why = check(p); }
+    catch (err) { why = err.message; }
+    const row = { p, why };
+    if (p) {
+      row.fallbackId = p.givenId || "puzzle-" + (i + 1);
+      row.name = p.givenId || nextName();
+      row.id = slug(row.name) || row.fallbackId;
+    }
+    return row;
+  });
+
+  const list = document.getElementById("list");
+  rows.forEach((row, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <span class="mark ${row.why ? "err" : "ok"}">${row.why ? "\u2717" : "\u2713"}</span>
+      <span class="what">
+        <span class="nameslot"></span>
+        <span class="id"></span>
+        ${row.p && row.p.sourceTitle ? `<span class="src">in the file: ${row.p.sourceTitle}</span>` : ""}
+        ${row.why ? `<span class="why">${row.why}</span>` : ""}
+      </span>`;
+    row.el = li;
+    if (row.p) {
+      li.querySelector(".nameslot").appendChild(nameField(row, i));
+      li.querySelector(".id").textContent = row.id + " \u00b7 " +
+        row.p.grid.length + "\u00d7" + row.p.grid[0].length +
+        (taken.has(row.id) ? " \u00b7 replaces an existing puzzle" : "");
+    } else {
+      li.querySelector(".nameslot").textContent = `entry ${i + 1}`;
+    }
+    list.appendChild(li);
+  });
+
+  const good = rows.filter(r => !r.why);
+  if (!good.length) {
+    btn.textContent = "Nothing usable";
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = `Add ${good.length} queued puzzle${good.length === 1 ? "" : "s"}`;
+  if (good.length < rows.length) say(`${rows.length - good.length} won't be added — see above.`);
+  btn.addEventListener("click", run);
+}
 
 if (missing.length) {
   btn.textContent = "Files missing";
@@ -163,31 +316,7 @@ if (missing.length) {
   btn.textContent = "Nothing queued";
   say("Paste puzzle JSON into the QUEUED array in add-puzzles.js.");
 } else {
-  const rows = QUEUED.map((entry, i) => {
-    let p, why;
-    try { p = convert(entry, i); why = check(p); }
-    catch (err) { why = err.message; }
-    return { p, why, label: (p && p.title) || `entry ${i + 1}` };
-  });
-  ready = rows.filter(r => !r.why).map(r => r.p);
-
-  document.getElementById("list").innerHTML = rows.map(r => `
-    <li>
-      <span class="mark ${r.why ? "err" : "ok"}">${r.why ? "\u2717" : "\u2713"}</span>
-      <span class="what">${r.label}
-        <span class="id">${r.p ? r.p.id + " \u00b7 " + r.p.grid.length + "\u00d7" + r.p.grid[0].length : ""}</span>
-        ${r.why ? `<span class="why">${r.why}</span>` : ""}
-      </span>
-    </li>`).join("");
-
-  if (!ready.length) {
-    btn.textContent = "Nothing usable";
-  } else {
-    btn.disabled = false;
-    btn.textContent = `Add ${ready.length} queued puzzle${ready.length === 1 ? "" : "s"}`;
-    if (ready.length < rows.length) say(`${rows.length - ready.length} won't be added — see above.`);
-    btn.addEventListener("click", run);
-  }
+  boot();
 }
 
 async function run() {
@@ -195,17 +324,20 @@ async function run() {
   say("Adding\u2026");
   const done = [];
   try {
-    for (const p of ready) {
-      const was = await puzzleRef(p.id).once("value");
-      await puzzleRef(p.id).set({
-        title: p.title,
-        byline: p.byline,
-        difficulty: p.difficulty,
-        grid: p.grid.join("\n"),
-        clues: p.clues,
+    for (const row of rows.filter(r => !r.why)) {
+      const id = row.id || row.fallbackId;
+      const was = await puzzleRef(id).once("value");
+      const record = {
+        title: row.name || id,
+        byline: row.p.byline,
+        difficulty: row.p.difficulty,
+        grid: row.p.grid.join("\n"),
+        clues: row.p.clues,
         createdAt: (was.exists() && was.val().createdAt) || firebase.database.ServerValue.TIMESTAMP
-      });
-      done.push(p);
+      };
+      if (row.p.shaded.length) record.shaded = row.p.shaded.join(" ");
+      await puzzleRef(id).set(record);
+      done.push({ id, title: record.title });
     }
   } catch (err) {
     console.error(err);

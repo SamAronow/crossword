@@ -97,7 +97,17 @@ const serverNow = () => Date.now() + serverOffset;
 
 // A stable per-browser identity, so we can colour each solver's letters
 // and show who is currently in the puzzle.
-const SOLVER_COLORS = ["#7c3aed", "#0891b2", "#059669", "#db2777", "#ea580c", "#4f46e5"];
+/* Blue is spoken for — it's what a confirmed-correct letter looks like — so no
+   solver colour is blue, and the first ones handed out are the furthest from
+   it. */
+const SOLVER_COLORS = [
+  "#7c3aed",  // violet
+  "#e11d48",  // rose
+  "#059669",  // green
+  "#ea580c",  // orange
+  "#a16207",  // ochre
+  "#be185d"   // magenta
+];
 
 function loadSolver() {
   let id = localStorage.getItem("cw:id");
@@ -111,6 +121,7 @@ function loadSolver() {
     localStorage.setItem("cw:name", name);
   }
   let color = localStorage.getItem("cw:color");
+  if (color && SOLVER_COLORS.indexOf(color) === -1) color = null;   // retired blue
   if (!color) {
     color = SOLVER_COLORS[Math.floor(Math.random() * SOLVER_COLORS.length)];
     localStorage.setItem("cw:color", color);
