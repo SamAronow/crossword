@@ -101,7 +101,11 @@ function clueMap(list) {
 function answerMap(list) {
   const out = {};
   if (Array.isArray(list)) list.forEach(c => {
-    if (c && c.number != null && c.answer) out[c.number] = String(c.answer).toUpperCase();
+    // Multi-word answers are often written with the spaces in ("SARI NOT
+    // SARI"); the grid never has them, so compare letters only.
+    if (c && c.number != null && c.answer) {
+      out[c.number] = String(c.answer).toUpperCase().replace(/[^A-Z]/g, "");
+    }
   });
   return out;
 }
@@ -128,7 +132,11 @@ function clueMap(list) {
 function answerMap(list) {
   const out = {};
   if (Array.isArray(list)) list.forEach(c => {
-    if (c && c.number != null && c.answer) out[c.number] = String(c.answer).toUpperCase();
+    // Multi-word answers are often written with the spaces in ("SARI NOT
+    // SARI"); the grid never has them, so compare letters only.
+    if (c && c.number != null && c.answer) {
+      out[c.number] = String(c.answer).toUpperCase().replace(/[^A-Z]/g, "");
+    }
   });
   return out;
 }
