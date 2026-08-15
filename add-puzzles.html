@@ -106,62 +106,38 @@ function answerMap(list) {
   return out;
 }
 
-/* Three grid shapes turn up:
-     rows of strings      ["APES.", …]
-     rows of arrays       [["A","P","E","S","black"], …]
-     one flat array       ["A","P","E","S",".", …]  with size:{rows,cols}
-*/
+/* The queue takes the shape you paste: a 2-D grid with "black" for black
+   squares, and clues as {number, clue, answer} objects. Rows of strings
+   ("APES.") still work, as do clues given as a plain map keyed by number. */
 function gridRows(entry) {
   const g = entry.grid || [];
   if (Array.isArray(g[0])) return g.map(row => row.map(cellChar).join(""));
-
-  const size = entry.size || {};
-  const cols = Number(size.cols), rows = Number(size.rows);
-  if (cols && rows && g.length === cols * rows) {
-    const out = [];
-    for (let r = 0; r < rows; r++) out.push(g.slice(r * cols, r * cols + cols).map(cellChar).join(""));
-    return out;
-  }
   return g.map(row => String(row).toUpperCase());
 }
 
-/* Clues arrive three ways too: {number, clue} objects, a plain map keyed by
-   number, or strings with the number baked in ("1. One side of a showdown").
-   In that last form the answers list runs parallel to the clue list. */
 function clueMap(list) {
   const out = {};
   if (Array.isArray(list)) {
-    list.forEach(c => {
-      if (typeof c === "string") {
-        const m = c.match(/^\s*(\d+)\s*[.:]?\s*([\s\S]*)$/);
-        if (m) out[m[1]] = m[2].trim();
-      } else if (c && c.number != null) {
-        out[c.number] = c.clue || "";
-      }
-    });
+    list.forEach(c => { if (c && c.number != null) out[c.number] = c.clue || ""; });
   } else if (list && typeof list === "object") {
     Object.entries(list).forEach(([n, c]) => { out[n] = c; });
   }
   return out;
 }
 
-function answerMap(clueList, answerList) {
+function answerMap(list) {
   const out = {};
-  if (Array.isArray(clueList) && Array.isArray(answerList)) {
-    clueList.forEach((c, i) => {
-      const n = typeof c === "string" ? (c.match(/^\s*(\d+)/) || [])[1] : (c && c.number);
-      if (n != null && answerList[i]) out[n] = String(answerList[i]).toUpperCase();
-    });
-  }
-  if (Array.isArray(clueList)) clueList.forEach(c => {
-    if (c && typeof c === "object" && c.number != null && c.answer) out[c.number] = String(c.answer).toUpperCase();
+  if (Array.isArray(list)) list.forEach(c => {
+    if (c && c.number != null && c.answer) out[c.number] = String(c.answer).toUpperCase();
   });
   return out;
 }
 
-/* Circled/shaded squares — some themes are unreadable without them. */
+/* Optional circled squares: either "r_c" keys in `shaded`, or a flat
+   row-major `circles` array of 0s and 1s. */
 function shadedKeys(entry, rows) {
-  const marks = entry.circles || entry.shadecircles === true && entry.circles;
+  if (Array.isArray(entry.shaded)) return entry.shaded.slice();
+  const marks = entry.circles;
   if (!Array.isArray(marks) || !rows.length) return [];
   const cols = rows[0].length;
   const out = [];
@@ -176,18 +152,14 @@ function shadedKeys(entry, rows) {
 function convert(entry, i) {
   const rows = gridRows(entry);
   const clues = entry.clues || {};
-  const answers = entry.answers || {};
   const sourceTitle = entry.title || "";
   return {
     sourceTitle,
-    byline: entry.byline || entry.author || "",
-    difficulty: entry.difficulty || entry.dow || "",
+    byline: entry.byline || "",
+    difficulty: entry.difficulty || "",
     grid: rows,
     clues: { across: clueMap(clues.across), down: clueMap(clues.down) },
-    answers: {
-      across: answerMap(clues.across, answers.across),
-      down: answerMap(clues.down, answers.down)
-    },
+    answers: { across: answerMap(clues.across), down: answerMap(clues.down) },
     shaded: shadedKeys(entry, rows),
     givenId: entry.id || ""
   };
