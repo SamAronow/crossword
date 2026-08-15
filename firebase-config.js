@@ -4,6 +4,7 @@
    Project settings → Your apps → Web app → SDK setup → Config).
 ------------------------------------------------------------------ */
 
+
 const firebaseConfig = {
   apiKey: "AIzaSyAT3tjP30uRMWHvmOzXKnL4UqGm4j67uaM",
   authDomain: "cross-6a36b.firebaseapp.com",
@@ -21,15 +22,73 @@ firebase.initializeApp(firebaseConfig);
    other projects.
 
      crossword/
-       puzzles/<id>   the puzzle itself: grid + clues   (rarely changes)
-       solves/<id>    what people have typed into it    (changes constantly)
+       puzzles/<id>     the puzzle itself: grid + clues   (rarely changes)
+       rooms/<code>     one group solving one puzzle      (changes constantly)
+         meta:  { puzzleId, createdAt, createdBy, startedAt, solvedAt }
+         cells/ revealed/ players/
+
+   A puzzle can have any number of rooms going at once, and they never see
+   each other's letters — the grid you're typing into belongs to the room,
+   not to the puzzle.
 */
 const ROOT = "crossword";
 const db = firebase.database();
 
-const puzzleRef     = id => db.ref(`${ROOT}/puzzles/${id}`);
-const allPuzzlesRef = ()  => db.ref(`${ROOT}/puzzles`);
-const solveRef      = id => db.ref(`${ROOT}/solves/${id}`);
+const puzzleRef     = id   => db.ref(`${ROOT}/puzzles/${id}`);
+const allPuzzlesRef = ()   => db.ref(`${ROOT}/puzzles`);
+const roomRef       = code => db.ref(`${ROOT}/rooms/${code}`);
+const allRoomsRef   = ()   => db.ref(`${ROOT}/rooms`);
+
+/* Room codes people have to read aloud and type, so no O/0 or I/1. */
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_LENGTH = 5;
+
+function randomRoomCode() {
+  let out = "";
+  const bytes = new Uint32Array(CODE_LENGTH);
+  crypto.getRandomValues(bytes);
+  for (let i = 0; i < CODE_LENGTH; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return out;
+}
+
+function tidyRoomCode(raw) {
+  return (raw || "").toUpperCase().split("")
+    .filter(ch => CODE_ALPHABET.includes(ch))   // drops spaces, dashes, typos
+    .join("").slice(0, CODE_LENGTH);
+}
+
+/* Claims an unused code. Retries on the (very unlikely) collision. */
+async function createRoom(puzzleId, solverId) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const code = randomRoomCode();
+    const snap = await roomRef(code).child("meta").once("value");
+    if (snap.exists()) continue;
+    await roomRef(code).child("meta").set({
+      puzzleId,
+      createdBy: solverId,
+      createdAt: firebase.database.ServerValue.TIMESTAMP
+    });
+    return code;
+  }
+  throw new Error("Couldn't find a free room code");
+}
+
+/* Rooms this browser has been in, newest first — so you don't have to keep
+   the code written down to get back to a puzzle you were part way through. */
+function rememberRoom(code, puzzleId) {
+  const list = recentRooms().filter(r => r.code !== code);
+  list.unshift({ code, puzzleId, at: Date.now() });
+  localStorage.setItem("cw:rooms", JSON.stringify(list.slice(0, 12)));
+}
+
+function recentRooms() {
+  try { return JSON.parse(localStorage.getItem("cw:rooms")) || []; }
+  catch (e) { return []; }
+}
+
+function forgetRoom(code) {
+  localStorage.setItem("cw:rooms", JSON.stringify(recentRooms().filter(r => r.code !== code)));
+}
 
 // Server-clock offset, so the shared timer agrees across computers.
 let serverOffset = 0;

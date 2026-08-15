@@ -170,6 +170,35 @@
 <script src="firebase-config.js"></script>
 <script src="crossword-core.js"></script>
 <script>
+/* ------------------------------------------------------------------
+   Every page here needs its sibling files. If one didn't load — wrong
+   folder, renamed, or a stale browser cache — say so plainly instead of
+   failing later with "X is not defined".
+------------------------------------------------------------------ */
+(function checkFiles() {
+  const missing = [];
+  if (typeof firebase === "undefined") missing.push("the Firebase SDK (from gstatic.com — offline?)");
+  if (typeof db === "undefined" || typeof ROOT === "undefined") missing.push("firebase-config.js");
+  if (typeof gridProblem === "undefined" || typeof buildModel === "undefined") missing.push("crossword-core.js");
+  if (!missing.length) return;
+  document.body.innerHTML =
+    `<div style="font-family:'Libre Franklin',Helvetica,Arial,sans-serif;max-width:560px;
+                 margin:70px auto;padding:0 22px;color:#121212;line-height:1.6">
+       <h1 style="font-size:20px;margin:0 0 12px">Some files didn't load</h1>
+       <p style="margin:0 0 14px">This page couldn't find: <b>${missing.join("</b>, <b>")}</b></p>
+       <p style="margin:0 0 14px;color:#6b6b6b;font-size:14px">
+         Every file has to sit in the same folder, spelled exactly:
+         <code>index.html</code>, <code>rooms.html</code>, <code>puzzle.html</code>,
+         <code>new.html</code>, <code>add-puzzles.html</code>, <code>add-puzzles.js</code>,
+         <code>crossword-core.js</code>, <code>firebase-config.js</code>.
+         Watch for a stray <code>.txt</code> on the end from downloading, and try a
+         hard refresh (Cmd-Shift-R) in case an old copy is cached.
+       </p>
+       <p style="margin:0;font-size:14px"><a href="index.html" style="color:#121212">Back to puzzles</a></p>
+     </div>`;
+  throw new Error("Missing: " + missing.join(", "));
+})();
+
 const $ = id => document.getElementById(id);
 const clues = { across: {}, down: {} };
 

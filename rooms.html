@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join or start a room · Crossword</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#121212;--muted:#6b6b6b;--line:#dcdcdc;
+    --select:#ffda00;--highlight:#a7d8ff;--bad:#c8102e;--good:#0a7d33;
+    --font:"Libre Franklin","Franklin Gothic Medium","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--font);color:var(--ink);background:#fff;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:640px;margin:0 auto;padding:0 20px 70px}
+
+  header.masthead{
+    display:flex;align-items:center;gap:14px;
+    border-bottom:1px solid var(--ink);padding:16px 0;margin-bottom:26px;
+  }
+  header.masthead h1{font-size:16px;font-weight:700;margin:0;flex:1}
+  .back{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;white-space:nowrap}
+  .back:hover{text-decoration:underline}
+
+  .puzzlehead{display:flex;gap:16px;align-items:center;margin-bottom:30px}
+  .thumb{display:grid;gap:1px;background:#000;border:1px solid #000;width:64px;height:64px;flex:none}
+  .thumb i{background:#fff}
+  .thumb i.b{background:#000}
+  .puzzlehead h2{font-size:22px;margin:0 0 4px;font-weight:700}
+  .puzzlehead p{margin:0;font-size:13px;color:var(--muted)}
+
+  .panel{border-top:1px solid var(--line);padding:24px 0}
+  .panel h3{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;margin:0 0 8px}
+  .panel p.why{margin:0 0 16px;font-size:14px;line-height:1.55;color:var(--muted)}
+
+  button{
+    font-family:var(--font);font-size:15px;font-weight:600;cursor:pointer;
+    padding:12px 24px;border-radius:24px;border:1px solid var(--ink);
+    background:var(--ink);color:#fff;
+  }
+  button.ghost{background:#fff;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  .joinrow{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+  #code{
+    font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:.42em;
+    text-transform:uppercase;text-align:center;
+    border:1px solid var(--line);border-radius:6px;padding:10px 6px 10px 18px;
+    width:200px;background:#fff;color:var(--ink);
+  }
+  #code:focus{outline:none;border-color:var(--ink);background:#fffdf0}
+  #code::placeholder{color:#c9c9c9;letter-spacing:.42em}
+
+  .said{font-size:13px;margin:12px 0 0;min-height:18px}
+  .said.err{color:var(--bad);font-weight:600}
+  .said.ok{color:var(--good);font-weight:600}
+  .said a{color:inherit}
+
+  ul.recent{list-style:none;margin:0;padding:0}
+  ul.recent li{
+    display:flex;align-items:center;gap:12px;
+    padding:11px 2px;border-bottom:1px solid var(--line);font-size:14px;
+  }
+  ul.recent li:first-child{border-top:1px solid var(--line)}
+  ul.recent .rcode{
+    font-family:var(--mono);font-weight:700;letter-spacing:.14em;font-size:15px;
+    min-width:5.6em;
+  }
+  ul.recent .rwhat{flex:1;color:var(--muted);font-size:13px;min-width:0}
+  ul.recent a.resume{
+    font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;
+    border:1px solid var(--line);border-radius:16px;padding:6px 14px;white-space:nowrap;
+  }
+  ul.recent a.resume:hover{border-color:var(--ink)}
+  .drop{
+    background:none;border:0;color:var(--muted);font-size:16px;cursor:pointer;
+    padding:2px 6px;border-radius:12px;
+  }
+  .drop:hover{background:#f2f2f2;color:var(--ink)}
+  .none{font-size:13px;color:var(--muted);margin:0}
+  .missing{padding:60px 20px;text-align:center}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="wrap">
+    <header class="masthead">
+      <a class="back" href="index.html">&larr; Puzzles</a>
+      <h1>Join or start a room</h1>
+    </header>
+    <div id="body"><p class="none">Loading&hellip;</p></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="crossword-core.js"></script>
+<script>
+/* ------------------------------------------------------------------
+   Every page here needs its sibling files. If one didn't load — wrong
+   folder, renamed, or a stale browser cache — say so plainly instead of
+   failing later with "X is not defined".
+------------------------------------------------------------------ */
+(function checkFiles() {
+  const missing = [];
+  if (typeof firebase === "undefined") missing.push("the Firebase SDK (from gstatic.com — offline?)");
+  if (typeof db === "undefined" || typeof ROOT === "undefined") missing.push("firebase-config.js");
+  if (typeof gridProblem === "undefined" || typeof buildModel === "undefined") missing.push("crossword-core.js");
+  if (!missing.length) return;
+  document.body.innerHTML =
+    `<div style="font-family:'Libre Franklin',Helvetica,Arial,sans-serif;max-width:560px;
+                 margin:70px auto;padding:0 22px;color:#121212;line-height:1.6">
+       <h1 style="font-size:20px;margin:0 0 12px">Some files didn't load</h1>
+       <p style="margin:0 0 14px">This page couldn't find: <b>${missing.join("</b>, <b>")}</b></p>
+       <p style="margin:0 0 14px;color:#6b6b6b;font-size:14px">
+         Every file has to sit in the same folder, spelled exactly:
+         <code>index.html</code>, <code>rooms.html</code>, <code>puzzle.html</code>,
+         <code>new.html</code>, <code>add-puzzles.html</code>, <code>add-puzzles.js</code>,
+         <code>crossword-core.js</code>, <code>firebase-config.js</code>.
+         Watch for a stray <code>.txt</code> on the end from downloading, and try a
+         hard refresh (Cmd-Shift-R) in case an old copy is cached.
+       </p>
+       <p style="margin:0;font-size:14px"><a href="index.html" style="color:#121212">Back to puzzles</a></p>
+     </div>`;
+  throw new Error("Missing: " + missing.join(", "));
+})();
+
+const me = loadSolver();
+const puzzleId = new URLSearchParams(location.search).get("id");
+const body = document.getElementById("body");
+
+function fail(head, msg) {
+  document.getElementById("app").innerHTML =
+    `<div class="missing"><h1>${head}</h1><p>${msg}</p>
+     <p><a href="index.html">Back to puzzles</a></p></div>`;
+}
+
+if (!puzzleId) {
+  fail("No puzzle chosen", "This page needs a puzzle, like <code>rooms.html?id=mini-1</code>.");
+} else {
+  puzzleRef(puzzleId).once("value").then(snap => {
+    const p = normalizePuzzle(puzzleId, snap.val());
+    if (!p) return fail("No such puzzle", `Nothing is stored under &ldquo;${puzzleId}&rdquo;.`);
+    if (gridProblem(p.grid)) return fail("That puzzle's grid won't load", gridProblem(p.grid));
+    render(p);
+  }).catch(err => {
+    console.error(err);
+    fail("Can't reach the database", "Check the config in firebase-config.js and your database rules.");
+  });
+}
+
+function render(puzzle) {
+  document.title = puzzle.title + " \u00b7 Rooms";
+  const cols = puzzle.grid[0].length;
+
+  body.innerHTML = `
+    <div class="puzzlehead">
+      <span class="thumb" style="grid-template-columns:repeat(${cols},1fr)"></span>
+      <div>
+        <h2></h2>
+        <p></p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Start a room</h3>
+      <p class="why">You'll get a code to pass around. Everyone who types it in
+        lands in your grid, and nobody else can see what you've filled in.</p>
+      <button type="button" id="create">Create a room</button>
+      <p class="said" id="createSaid"></p>
+    </div>
+
+    <div class="panel">
+      <h3>Join a room</h3>
+      <p class="why">Type the code someone gave you.</p>
+      <div class="joinrow">
+        <input id="code" placeholder="\u00b7\u00b7\u00b7\u00b7\u00b7" maxlength="5"
+               autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Room code">
+        <button type="button" class="ghost" id="join">Join</button>
+      </div>
+      <p class="said" id="joinSaid"></p>
+    </div>
+
+    <div class="panel" id="recentPanel">
+      <h3>Rooms you've been in</h3>
+      <div id="recent"></div>
+    </div>`;
+
+  body.querySelector("h2").textContent = puzzle.title;
+  body.querySelector(".puzzlehead p").textContent =
+    [puzzle.grid.length + "\u00d7" + cols, puzzle.difficulty, puzzle.byline].filter(Boolean).join(" \u00b7 ");
+
+  const thumb = body.querySelector(".thumb");
+  puzzle.grid.forEach(row => {
+    for (const ch of row) {
+      const i = document.createElement("i");
+      if (ch === ".") i.className = "b";
+      thumb.appendChild(i);
+    }
+  });
+
+  const say = (el, msg, kind) => {
+    const e = document.getElementById(el);
+    e.innerHTML = msg;
+    e.className = "said" + (kind ? " " + kind : "");
+  };
+
+  const go = code => {
+    rememberRoom(code, puzzleId);
+    location.href = `puzzle.html?room=${encodeURIComponent(code)}`;
+  };
+
+  // ---- create ----
+  document.getElementById("create").addEventListener("click", async () => {
+    const btn = document.getElementById("create");
+    btn.disabled = true;
+    say("createSaid", "Making a room\u2026");
+    try {
+      const code = await createRoom(puzzleId, me.id);
+      say("createSaid", `Room <b>${code}</b> \u2014 opening it now\u2026`, "ok");
+      go(code);
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false;
+      say("createSaid", "Couldn't create a room \u2014 check that your database rules allow writes.", "err");
+    }
+  });
+
+  // ---- join ----
+  const codeInput = document.getElementById("code");
+  codeInput.addEventListener("input", () => {
+    const clean = tidyRoomCode(codeInput.value);
+    if (clean !== codeInput.value) codeInput.value = clean;
+    say("joinSaid", "");
+  });
+  codeInput.addEventListener("keydown", e => { if (e.key === "Enter") joinNow(); });
+  document.getElementById("join").addEventListener("click", joinNow);
+
+  async function joinNow() {
+    const code = tidyRoomCode(codeInput.value);
+    if (code.length < CODE_LENGTH) return say("joinSaid", "That code is too short.", "err");
+    say("joinSaid", "Looking\u2026");
+    try {
+      const snap = await roomRef(code).child("meta").once("value");
+      const meta = snap.val();
+      if (!meta) return say("joinSaid", "No room with that code. Codes are five characters.", "err");
+      if (meta.puzzleId !== puzzleId) {
+        // The code wins — a room knows which puzzle it belongs to.
+        say("joinSaid", "That room is solving a different puzzle. Taking you there\u2026", "ok");
+      }
+      rememberRoom(code, meta.puzzleId);
+      location.href = `puzzle.html?room=${encodeURIComponent(code)}`;
+    } catch (err) {
+      console.error(err);
+      say("joinSaid", "Couldn't reach the database.", "err");
+    }
+  }
+
+  drawRecent();
+}
+
+/* Recent rooms, with live progress so you can tell them apart. */
+function drawRecent() {
+  const mine = recentRooms();
+  const box = document.getElementById("recent");
+  if (!mine.length) {
+    box.innerHTML = `<p class="none">None yet. Rooms you create or join show up here.</p>`;
+    return;
+  }
+  const ul = document.createElement("ul");
+  ul.className = "recent";
+  box.innerHTML = "";
+  box.appendChild(ul);
+
+  mine.forEach(entry => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <span class="rcode"></span>
+      <span class="rwhat">&hellip;</span>
+      <a class="resume" href="puzzle.html?room=${encodeURIComponent(entry.code)}">Resume</a>
+      <button type="button" class="drop" title="Remove from this list">&times;</button>`;
+    li.querySelector(".rcode").textContent = entry.code;
+    li.querySelector(".drop").addEventListener("click", () => {
+      forgetRoom(entry.code);
+      li.remove();
+      if (!document.querySelectorAll("ul.recent li").length) drawRecent();
+    });
+    ul.appendChild(li);
+
+    const what = li.querySelector(".rwhat");
+    roomRef(entry.code).once("value").then(async snap => {
+      const room = snap.val();
+      if (!room || !room.meta) { what.textContent = "no longer in the database"; return; }
+      const psnap = await puzzleRef(room.meta.puzzleId).once("value");
+      const p = normalizePuzzle(room.meta.puzzleId, psnap.val());
+      const filled = Object.keys(room.cells || {}).length;
+      let total = 0;
+      if (p) p.grid.forEach(row => { for (const ch of row) if (ch !== ".") total++; });
+      const here = Object.values(room.players || {})
+        .filter(pl => pl && serverNow() - (pl.ts || 0) < 90000).length;
+      const bits = [p ? p.title : room.meta.puzzleId];
+      if (room.meta.solvedAt) bits.push("solved");
+      else if (total) bits.push(`${filled} of ${total} filled`);
+      if (here) bits.push(`${here} here now`);
+      what.textContent = bits.join(" \u00b7 ");
+    }).catch(() => { what.textContent = ""; });
+  });
+}
+</script>
+</body>
+</html>

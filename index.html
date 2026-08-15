@@ -98,9 +98,9 @@
   <div id="mount"><p class="status">Loading&hellip;</p></div>
 
   <p class="note">
-    Open a puzzle and send the link to anyone. Every letter typed shows up on
-    everyone's screen as it's typed, and the grid is waiting exactly as you left
-    it whenever you come back.
+    Pick a puzzle, then start a room or type in a friend's code. Everyone in a
+    room shares one grid &mdash; letters appear as they're typed &mdash; and other
+    rooms solving the same puzzle never see it.
   </p>
 </div>
 
@@ -109,6 +109,35 @@
 <script src="firebase-config.js"></script>
 <script src="crossword-core.js"></script>
 <script>
+/* ------------------------------------------------------------------
+   Every page here needs its sibling files. If one didn't load — wrong
+   folder, renamed, or a stale browser cache — say so plainly instead of
+   failing later with "X is not defined".
+------------------------------------------------------------------ */
+(function checkFiles() {
+  const missing = [];
+  if (typeof firebase === "undefined") missing.push("the Firebase SDK (from gstatic.com — offline?)");
+  if (typeof db === "undefined" || typeof ROOT === "undefined") missing.push("firebase-config.js");
+  if (typeof gridProblem === "undefined" || typeof buildModel === "undefined") missing.push("crossword-core.js");
+  if (!missing.length) return;
+  document.body.innerHTML =
+    `<div style="font-family:'Libre Franklin',Helvetica,Arial,sans-serif;max-width:560px;
+                 margin:70px auto;padding:0 22px;color:#121212;line-height:1.6">
+       <h1 style="font-size:20px;margin:0 0 12px">Some files didn't load</h1>
+       <p style="margin:0 0 14px">This page couldn't find: <b>${missing.join("</b>, <b>")}</b></p>
+       <p style="margin:0 0 14px;color:#6b6b6b;font-size:14px">
+         Every file has to sit in the same folder, spelled exactly:
+         <code>index.html</code>, <code>rooms.html</code>, <code>puzzle.html</code>,
+         <code>new.html</code>, <code>add-puzzles.html</code>, <code>add-puzzles.js</code>,
+         <code>crossword-core.js</code>, <code>firebase-config.js</code>.
+         Watch for a stray <code>.txt</code> on the end from downloading, and try a
+         hard refresh (Cmd-Shift-R) in case an old copy is cached.
+       </p>
+       <p style="margin:0;font-size:14px"><a href="index.html" style="color:#121212">Back to puzzles</a></p>
+     </div>`;
+  throw new Error("Missing: " + missing.join(", "));
+})();
+
 const me = loadSolver();
 
 const nameInput = document.getElementById("nameInput");
@@ -120,6 +149,7 @@ nameInput.addEventListener("change", () => {
 });
 
 const mount = document.getElementById("mount");
+const cardsByPuzzle = new Map();
 
 function openSquares(grid) {
   let n = 0;
@@ -139,6 +169,7 @@ function render(puzzles) {
     return;
   }
 
+  cardsByPuzzle.clear();
   const ul = document.createElement("ul");
   ul.className = "puzzles";
   mount.innerHTML = "";
@@ -151,7 +182,7 @@ function render(puzzles) {
     const li = document.createElement("li");
     li.className = "puzzle";
     li.innerHTML = `
-      <a class="card" href="puzzle.html?id=${encodeURIComponent(p.id)}">
+      <a class="card" href="rooms.html?id=${encodeURIComponent(p.id)}">
         <span class="thumb" style="grid-template-columns:repeat(${cols},1fr)"></span>
         <span>
           <span class="title"></span>
@@ -178,31 +209,58 @@ function render(puzzles) {
 
     ul.appendChild(li);
 
-    const statusText = li.querySelector(".statusText");
-    const fill = li.querySelector(".fill");
+    cardsByPuzzle.set(p.id, {
+      statusText: li.querySelector(".statusText"),
+      fill: li.querySelector(".fill"),
+      total
+    });
+  });
 
-    // Live progress: how much is filled in, and who's in there right now.
-    solveRef(p.id).on("value", snap => {
-      const data = snap.val() || {};
-      const filled = Object.keys(data.cells || {}).length;
-      const players = data.players || {};
-      const here = Object.values(players).filter(pl => pl && serverNow() - (pl.ts || 0) < 90000).length;
+  applyRoomStats();
+}
 
-      fill.style.width = Math.round((filled / total) * 100) + "%";
+/* Rooms are counted per puzzle: how many are going, how many people are in
+   them right now, and how far the furthest-along one has got. */
+let latestRooms = {};
 
-      if (data.meta && data.meta.solvedAt) {
-        statusText.innerHTML = `<span class="solved">Solved</span>`;
-        fill.style.background = "#0a7d33";
-      } else if (here > 0) {
-        statusText.innerHTML = `<span class="live"><span class="dot"></span>${here} solving now</span>`;
-      } else if (filled > 0) {
-        statusText.textContent = filled + " of " + total + " filled";
-      } else {
-        statusText.textContent = "Not started";
-      }
-    }, err => { statusText.textContent = "Offline"; console.error(err); });
+function applyRoomStats() {
+  const per = new Map();
+  Object.values(latestRooms).forEach(room => {
+    if (!room || !room.meta || !room.meta.puzzleId) return;
+    const s = per.get(room.meta.puzzleId) || { rooms: 0, live: 0, best: 0, solved: 0 };
+    s.rooms++;
+    s.live += Object.values(room.players || {})
+      .filter(pl => pl && serverNow() - (pl.ts || 0) < 90000).length;
+    s.best = Math.max(s.best, Object.keys(room.cells || {}).length);
+    if (room.meta.solvedAt) s.solved++;
+    per.set(room.meta.puzzleId, s);
+  });
+
+  cardsByPuzzle.forEach((card, id) => {
+    const s = per.get(id);
+    if (!s) {
+      card.statusText.textContent = "No rooms yet";
+      card.fill.style.width = "0%";
+      return;
+    }
+    card.fill.style.width = Math.round((s.best / card.total) * 100) + "%";
+    card.fill.style.background = s.solved && s.solved === s.rooms ? "#0a7d33" : "";
+    const rooms = s.rooms + (s.rooms === 1 ? " room" : " rooms");
+    if (s.live) {
+      card.statusText.innerHTML =
+        `<span class="live"><span class="dot"></span>${s.live} solving now</span><br>${rooms}`;
+    } else if (s.solved) {
+      card.statusText.innerHTML = `<span class="solved">Solved</span><br>${rooms}`;
+    } else {
+      card.statusText.textContent = rooms;
+    }
   });
 }
+
+allRoomsRef().on("value", snap => {
+  latestRooms = snap.val() || {};
+  applyRoomStats();
+}, err => console.error(err));
 
 // The list is live too — add a puzzle in another tab and it shows up here.
 allPuzzlesRef().on("value", snap => {

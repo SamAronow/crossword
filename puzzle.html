@@ -49,6 +49,14 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
   .headright{display:flex;align-items:center;gap:12px}
+  .roomchip{
+    font-family:var(--font);font-size:12px;font-weight:500;color:var(--muted);
+    background:#fff;border:1px solid var(--line);border-radius:14px;
+    padding:5px 11px;cursor:pointer;white-space:nowrap;
+  }
+  .roomchip b{font-weight:700;color:var(--ink);letter-spacing:.12em;margin-left:3px}
+  .roomchip:hover{border-color:#999}
+  .roomchip.copied{color:#0a7d33;border-color:#0a7d33}
   .timer{
     font-variant-numeric:tabular-nums;
     font-size:14px;font-weight:600;color:var(--muted);
@@ -228,28 +236,72 @@
 <script src="firebase-config.js"></script>
 <script src="crossword-core.js"></script>
 <script>
+/* ------------------------------------------------------------------
+   Every page here needs its sibling files. If one didn't load — wrong
+   folder, renamed, or a stale browser cache — say so plainly instead of
+   failing later with "X is not defined".
+------------------------------------------------------------------ */
+(function checkFiles() {
+  const missing = [];
+  if (typeof firebase === "undefined") missing.push("the Firebase SDK (from gstatic.com — offline?)");
+  if (typeof db === "undefined" || typeof ROOT === "undefined") missing.push("firebase-config.js");
+  if (typeof gridProblem === "undefined" || typeof buildModel === "undefined") missing.push("crossword-core.js");
+  if (!missing.length) return;
+  document.body.innerHTML =
+    `<div style="font-family:'Libre Franklin',Helvetica,Arial,sans-serif;max-width:560px;
+                 margin:70px auto;padding:0 22px;color:#121212;line-height:1.6">
+       <h1 style="font-size:20px;margin:0 0 12px">Some files didn't load</h1>
+       <p style="margin:0 0 14px">This page couldn't find: <b>${missing.join("</b>, <b>")}</b></p>
+       <p style="margin:0 0 14px;color:#6b6b6b;font-size:14px">
+         Every file has to sit in the same folder, spelled exactly:
+         <code>index.html</code>, <code>rooms.html</code>, <code>puzzle.html</code>,
+         <code>new.html</code>, <code>add-puzzles.html</code>, <code>add-puzzles.js</code>,
+         <code>crossword-core.js</code>, <code>firebase-config.js</code>.
+         Watch for a stray <code>.txt</code> on the end from downloading, and try a
+         hard refresh (Cmd-Shift-R) in case an old copy is cached.
+       </p>
+       <p style="margin:0;font-size:14px"><a href="index.html" style="color:#121212">Back to puzzles</a></p>
+     </div>`;
+  throw new Error("Missing: " + missing.join(", "));
+})();
+
 /* ==================================================================
-   1. Load the puzzle out of the database
+   1. Find the room, then the puzzle it's solving
 ================================================================== */
-const puzzleId = new URLSearchParams(location.search).get("id");
+const params = new URLSearchParams(location.search);
+const roomCode = tidyRoomCode(params.get("room"));
+const askedPuzzle = params.get("id");
 const app = document.getElementById("app");
 
 function fail(head, body) {
-  app.innerHTML = `<div class="missing"><h1>${head}</h1><p>${body}</p>
-    <p><a href="index.html">Back to puzzles</a></p></div>`;
+  const back = askedPuzzle
+    ? `<a href="rooms.html?id=${encodeURIComponent(askedPuzzle)}">Back to rooms</a>`
+    : `<a href="index.html">Back to puzzles</a>`;
+  app.innerHTML = `<div class="missing"><h1>${head}</h1><p>${body}</p><p>${back}</p></div>`;
 }
 
-if (!puzzleId) {
-  fail("No puzzle chosen", "A puzzle link carries its id, like <code>puzzle.html?id=mini-1</code>.");
+if (!roomCode) {
+  // An old-style link with just a puzzle: send them through the room picker.
+  location.replace(askedPuzzle
+    ? `rooms.html?id=${encodeURIComponent(askedPuzzle)}`
+    : "index.html");
 } else {
   app.innerHTML = `<div class="missing"><p>Loading&hellip;</p></div>`;
-  puzzleRef(puzzleId).once("value").then(snap => {
-    const p = normalizePuzzle(puzzleId, snap.val());
-    if (!p) return fail("No such puzzle",
-      `Nothing is stored under &ldquo;${puzzleId}&rdquo;. You can add one on the <a href="new.html">new puzzle</a> page.`);
-    const problem = gridProblem(p.grid);
-    if (problem) return fail("That puzzle's grid won't load", problem);
-    start(p);
+  roomRef(roomCode).child("meta").once("value").then(snap => {
+    const meta = snap.val();
+    if (!meta || !meta.puzzleId) {
+      return fail("No such room",
+        `Nothing is running under &ldquo;${roomCode}&rdquo;. Check the code, or start a room of your own.`);
+    }
+    return puzzleRef(meta.puzzleId).once("value").then(psnap => {
+      const p = normalizePuzzle(meta.puzzleId, psnap.val());
+      if (!p) return fail("That room's puzzle is missing",
+        `The room is solving &ldquo;${meta.puzzleId}&rdquo;, which isn't in the database.`);
+      const problem = gridProblem(p.grid);
+      if (problem) return fail("That puzzle's grid won't load", problem);
+      rememberRoom(roomCode, meta.puzzleId);
+      start(p);
+    });
   }).catch(err => {
     console.error(err);
     fail("Can't reach the database", "Check the config in firebase-config.js and your database rules.");
@@ -283,7 +335,7 @@ const S = {
 const key = (r, c) => r + "_" + c;
 const letterAt = cell => (S.letters[key(cell.r, cell.c)] || {}).l || "";
 
-const pRef        = solveRef(puzzleId);
+const pRef        = roomRef(roomCode);
 const cellsRef    = pRef.child("cells");
 const revealedRef = pRef.child("revealed");
 const metaRef     = pRef.child("meta");
@@ -295,9 +347,11 @@ const meRef       = playersRef.child(me.id);
 ================================================================== */
 document.getElementById("app").innerHTML = `
   <div class="masthead">
-    <a class="back" href="index.html">&larr; Puzzles</a>
+    <a class="back" href="rooms.html?id=${encodeURIComponent(puzzle.id)}">&larr; Rooms</a>
     <h1>${puzzle.title}</h1>
     <div class="headright">
+      <button type="button" class="roomchip" id="roomChip"
+              title="Copy the link to this room">Room <b>${roomCode}</b></button>
       <div class="who" id="who"></div>
       <span class="timer" id="timer">0:00</span>
     </div>
@@ -354,7 +408,7 @@ document.getElementById("app").innerHTML = `
       <h2>Solved</h2>
       <p id="solvedWho">Nice work.</p>
       <p class="time" id="solvedTime">0:00</p>
-      <a href="index.html">Back to puzzles</a>
+      <a href="rooms.html?id=${encodeURIComponent(puzzle.id)}">Back to rooms</a>
       <button type="button" class="ghost" id="closeModal">Keep looking at it</button>
     </div>
   </div>
@@ -670,7 +724,8 @@ function doClear(scope) {
     delete S.letters[k]; delete S.revealed[k]; delete S.wrong[k];
   });
   if (scope === "puzzle") {
-    updates["meta"] = null;
+    updates["meta/startedAt"] = null;      // never clear meta itself — it holds
+    updates["meta/solvedAt"] = null;       // which puzzle this room is solving
     S.startedAt = null; S.solvedAt = null; S.modalShown = false;
   }
   pRef.update(updates).catch(dbError);
@@ -714,6 +769,23 @@ gridEl.addEventListener("pointerdown", e => {
 document.getElementById("prevClue").addEventListener("click", () => { gotoEntry(-1, false); focusHidden(); });
 document.getElementById("nextClue").addEventListener("click", () => { gotoEntry(1, false); focusHidden(); });
 document.getElementById("closeModal").addEventListener("click", () => scrim.classList.remove("open"));
+
+const roomChip = document.getElementById("roomChip");
+roomChip.addEventListener("click", async () => {
+  const link = location.origin + location.pathname + "?room=" + roomCode;
+  try {
+    await navigator.clipboard.writeText(link);
+    roomChip.classList.add("copied");
+    roomChip.innerHTML = "Link copied";
+    setTimeout(() => {
+      roomChip.classList.remove("copied");
+      roomChip.innerHTML = `Room <b>${roomCode}</b>`;
+    }, 1600);
+  } catch (e) {
+    prompt("Copy this link:", link);
+  }
+  focusHidden();
+});
 
 function focusHidden() {
   hidden.value = SENTINEL;
@@ -780,7 +852,7 @@ revealedRef.on("value", s => {
 });
 
 metaRef.on("value", s => {
-  const m = s.val() || {};
+  const m = s.val() || {};   // also carries puzzleId/createdAt — left alone here
   S.startedAt = m.startedAt || null;
   const wasSolved = S.solvedAt;
   S.solvedAt = m.solvedAt || null;

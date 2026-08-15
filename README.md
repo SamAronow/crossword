@@ -1,24 +1,30 @@
 # Crossword — shared solving
 
-Vanilla HTML/JS on Firebase Realtime Database, no build step. Puzzles live in
-the database, not in the code.
+A crossword you solve with other people in real time. Vanilla HTML and
+JavaScript on Firebase Realtime Database — no build step, no framework, no
+server of your own. Puzzles live in the database rather than in the code.
 
 ```
-index.html          home page — lists whatever puzzles are in the database
-puzzle.html?id=...  the solver
-new.html            add a puzzle (opens with the sample already filled in)
-crossword-core.js   the stored-record shape, grid validation, numbering
-firebase-config.js  your Firebase config + database paths
+index.html             home page — lists whatever puzzles are in the database
+rooms.html?id=...      start a room, or type in someone's code
+puzzle.html?room=...   the solver, for one room
+new.html               build and save a puzzle (opens with the sample filled in)
+add-puzzles.html       (re)load every puzzle this app ships with, one click
+add-puzzles.js         those puzzles' grids and clues
+crossword-core.js      record shape, grid validation, square numbering
+firebase-config.js     your Firebase config + the database paths
 ```
 
-`puzzles.js` from the earlier version is gone — delete it if it's still in the
-folder.
+All eight files sit in one flat folder. There's no `puzzles.js` any more — if
+one is left over from an early version, delete it.
 
 ## Setup
 
-**1.** Paste your Firebase web config into `firebase-config.js`.
+**1. Paste your Firebase web config** into `firebase-config.js`. Everything the
+app writes lives under a single `crossword` key, so it can share a database with
+your other projects.
 
-**2.** Database rules:
+**2. Set the database rules:**
 
 ```json
 {
@@ -31,19 +37,44 @@ folder.
 }
 ```
 
-Anyone with the URL can then read and write that subtree — which is the point,
-but it does mean anyone with the URL.
+Anyone with the URL can read and write that subtree. That's the point — no
+accounts, no login, just send someone a link — but it does mean *anyone* with
+the URL. If you ever want it tighter, the usual move is anonymous auth plus
+`".write": "auth != null"`.
 
-**3.** Serve the folder (`python3 -m http.server 8000`) and open `new.html`.
-It comes up pre-filled with the sample mini, so **one click on "Add to
-database" seeds it** and you're solving. For two computers, push the folder to
-a repo and deploy to Vercel — it's all static.
+**3. Serve the folder** — `python3 -m http.server 8000` — and open
+`http://localhost:8000/add-puzzles.html`. One click loads the four puzzles and
+you're solving. Opening the files directly with `file://` mostly works, but a
+local server behaves more like the real thing.
 
-## What's stored where
+For solving with someone on another computer, push the folder to a repo and
+deploy to Vercel. It's all static; there's nothing to configure.
+
+## Rooms
+
+A puzzle by itself is just a grid and clues. The typing happens in a **room**.
+
+Click a puzzle and you're asked to start a room or enter a code. Starting one
+mints a five-character code like `K7QTM`; anyone who types it in lands in your
+grid, and the link `puzzle.html?room=K7QTM` is all they need — a room knows
+which puzzle it belongs to. Two rooms on the same puzzle never see each other's
+letters, so you and a friend can work one grid while someone else works another,
+untouched.
+
+Codes skip `O`/`0` and `I`/`1` so they survive being read aloud, and the code
+box quietly drops spaces, dashes, and anything that isn't a code character. The
+room code in the header doubles as a copy-link button. `rooms.html` also lists
+rooms this browser has been in, with live progress on each, so a half-finished
+grid isn't lost just because nobody wrote the code down.
+
+Old `puzzle.html?id=…` links still work — they redirect to that puzzle's room
+picker.
+
+## How the syncing works
 
 ```
 crossword/
-  puzzles/<id>        the puzzle itself — grid, clues, title  (rarely changes)
+  puzzles/<id>          the puzzle itself       (rarely changes)
     title:      "Mini No. 1"
     byline:     "Test puzzle"
     difficulty: "Easy"
@@ -52,43 +83,60 @@ crossword/
                   down:   { "1": "Spirit in a daiquiri", … } }
     createdAt:  1723600000000
 
-  solves/<id>         what people have typed  (changes constantly)
-    cells/2_3:   { l: "O", by: "s8fk2a", cl: "#7c3aed", at: 1723… }
-    revealed/2_3: true
-    meta:        { startedAt, solvedAt }
+  rooms/<code>          one group solving one puzzle  (changes constantly)
+    meta:           { puzzleId, createdAt, createdBy, startedAt, solvedAt }
+    cells/2_3:      { l: "O", by: "s8fk2a", cl: "#7c3aed", at: 1723… }
+    revealed/2_3:   true
     players/s8fk2a: { name, color, r, c, dir, ts }
 ```
 
-The two are separate on purpose: clearing a grid wipes `solves/<id>` and never
-touches the puzzle. Deleting `solves/<id>` by hand in the Firebase console is a
-clean reset.
+**One square, one database key.** Two people typing in different squares never
+collide; the same square is last-write-wins. Each page attaches
+`child_added` / `child_changed` / `child_removed` listeners to the room's
+`cells`, so a letter shows up on everyone else's screen as it's typed. Your own
+typing paints immediately and the listener just confirms it, so there's no lag
+on your own keystrokes.
 
-In `grid`, a letter is that square's answer and `.` is a black square. Square
-numbers are **computed from the grid**, never stored — which is why `new.html`
-generates the clue fields for you instead of asking you to number them. Clue
-keys are those computed numbers.
+**Presence** is `players`, cleaned up by `onDisconnect().remove()` plus a
+25-second heartbeat. Other solvers show up as coloured rings on the square
+they're sitting in, initials in the header, and their letters appear in their
+colour.
 
-One square per database key means two people typing in different squares never
-collide; the same square is last-write-wins. Each page listens with
-`child_added` / `child_changed` / `child_removed` on `cells`, and local writes
-paint immediately, so your own typing has no lag while your friend's letters
-land as he types them.
+**The timer is shared** — it starts on the first letter anyone types and stops
+when the grid is complete and correct.
 
-`players` is presence — `onDisconnect().remove()` plus a 25-second heartbeat.
-Other solvers show as coloured rings on the square they're in, initials in the
-header, and their letters appear in their colour. The timer is shared: it
-starts on the first letter anyone types and stops when the grid is correct.
+**Puzzles and rooms are separate on purpose.** Clearing a grid empties that one
+room and never touches the puzzle or any other room. `meta.puzzleId` is what
+ties a room to its puzzle, so Clear leaves that key alone. Deleting
+`rooms/<code>` in the Firebase console removes a room; deleting a puzzle while
+rooms point at it doesn't lose their letters — re-add the puzzle and those rooms
+come back to life.
 
-## Adding a puzzle
+## Adding puzzles
 
-`new.html` does it: type or paste a grid, and the numbered preview and one clue
-field per entry (labelled with its answer) appear as you type. It refuses to
-save a grid with ragged rows and warns about empty clues. Saving over an
-existing id replaces the puzzle and leaves anything typed into it alone.
+**`add-puzzles.html`** loads everything the app ships with: the 5×5 sample plus
+three original 11×11 easies. It verifies each one first — usable grid, a clue on
+every entry, no clue numbered for an entry that doesn't exist — and shows the
+numbered grid and clue list so you can see what you're adding. Re-running it
+overwrites the puzzle records only; rooms and anything typed into them are
+untouched. Use it to refill an empty database or seed a fresh Firebase project.
 
-Any rectangle works — 15×15 is the same data shape as 5×5. The sample mini
-gives RUB / USED / MELON / ROSE / WET across, RUM / USER / BELOW / DOSE / NET
-down.
+**`new.html`** is for puzzles of your own. Type or paste a grid and the numbered
+preview and one clue field per entry — each labelled with its answer — appear as
+you type. Square numbers are computed from the grid and never stored, which is
+why you never number clues by hand. It refuses to save ragged rows and warns
+about empty clues. Any rectangle works; 15×15 is the same data shape as 5×5.
+
+In a grid, a letter is that square's answer and `.` is a black square.
+
+To load a batch of your own, copy the shape of `add-puzzles.js`.
+
+A note on the shipped puzzles: published crosswords are copyrighted, grid and
+clues both, so these are constructed rather than borrowed. The grids are
+machine-filled from a ~13,000-word pool of common English — proper nouns and
+abbreviations filtered out — and then hand-clued. They follow the usual
+conventions: 180-degree symmetry, nothing shorter than three letters, every
+square crossed in both directions, no 2×2 blocks of black.
 
 ## Keyboard (NYT behaviour)
 
@@ -96,16 +144,48 @@ down.
 | --- | --- |
 | Letter | Fills the square, moves to the next empty square in the word; when the word is full, jumps to the next unfinished clue |
 | Backspace | Clears the square and steps back within the word |
-| Delete | Clears the square, cursor stays |
+| Delete | Clears the square, cursor stays put |
 | Space / Enter | Switches between Across and Down |
 | Arrow, same direction | Moves one square, skipping black squares |
 | Arrow, other direction | Switches direction first, then moves on the next press |
 | Tab / Shift-Tab | Next / previous clue, landing on its first empty square |
 | Click a square | Selects it; clicking it again flips direction |
 
-Check marks are per-browser (your red slashes are yours). Reveal and Clear are
+Check marks are per-browser — your red slashes are yours. Reveal and Clear are
 shared, since they change the grid everyone is looking at.
 
-Worth knowing: answers are in the puzzle record, which every client downloads,
-so anyone can dig them out of the network tab. Fine among friends. Closing that
-would mean keeping answers server-side and making Check/Reveal database calls.
+## When something's wrong
+
+**"Some files didn't load."** Every page checks its siblings on startup and names
+whichever is missing. Usually the file isn't in the folder, got saved with a
+stray `.txt` on the end, or the browser is holding an old copy — hard refresh
+with Cmd-Shift-R. If you get a raw `X is not defined` in the console instead,
+it's the same problem on a page that predates the check.
+
+**"Can't reach the database."** The config in `firebase-config.js` is still
+placeholder text, or the database rules don't allow reads. Check the browser's
+Network tab.
+
+**"Couldn't write to the database."** Rules allow reads but not writes. See step
+2 above.
+
+**"No room with that code."** Codes are five characters and never contain `O`,
+`0`, `I`, or `1`. The room may also have been deleted from the console.
+
+**A room's puzzle went missing.** Re-add the puzzle with `add-puzzles.html` (or
+`new.html`, under the same id) and the room works again with its letters intact.
+
+**Starting over.** Delete `crossword/rooms` in the Firebase console to clear
+every grid while keeping the puzzles. Delete `crossword` entirely to reset the
+whole thing, then run `add-puzzles.html` again.
+
+## Known limits
+
+- Answers are in the puzzle record, which every client downloads, so anyone can
+  dig them out of the network tab. Fine among friends. Closing that would mean
+  keeping answers server-side and turning Check and Reveal into database calls.
+- Open rules mean anyone with a room code can type in that grid, and anyone at
+  all can add or overwrite puzzles.
+- Mobile typing goes through a hidden input. It works, but it's the part most
+  worth testing on your own phone.
+- Nothing expires. Rooms accumulate until you delete them.
