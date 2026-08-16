@@ -9,6 +9,7 @@ index.html             home page — lists whatever puzzles are in the database
 rooms.html?id=...      start a room, or type in someone's code
 puzzle.html?room=...   the solver, for one room
 new.html               build and save a puzzle (opens with the sample filled in)
+import.html            drop in .puz / .ipuz files from other sites
 add-puzzles.html       one button: adds whatever is queued in add-puzzles.js
 add-puzzles.js         the queue — paste puzzle JSON here
 crossword-core.js      record shape, grid validation, square numbering
@@ -125,6 +126,20 @@ clues. Any rectangle works; 15×15 is the same data shape as 5×5.
 
 In a grid, a letter is that square's answer and `.` is a black square.
 
+**`import.html`** takes puzzle files. Drop `.puz` (Across Lite) or `.ipuz` files
+on it — or click to pick them — and it parses them in the browser and writes them
+to `crossword/puzzles/<id>`. Title and author come from the file, circled squares
+come across, and each puzzle gets an editable name before you commit. Nothing is
+uploaded anywhere; the file is read locally and goes straight to your database.
+
+Rebus squares and scrambled puzzles are refused with a reason rather than
+half-imported.
+
+Sources worth knowing: brendanemmettquigley.com posts free .puz twice a week,
+crosshare.org hosts thousands of community puzzles, and `xword-dl` fetches .puz
+from USA Today, Universal, LA Times, WSJ, Washington Post, Newsday, the New
+Yorker and the Atlantic. NYT dropped .puz support in 2021, so it isn't a source.
+
 **`add-puzzles.html`** is the bulk route: paste puzzle JSON objects into the
 `QUEUED` array in `add-puzzles.js` and press the button.
 
@@ -134,28 +149,25 @@ from whatever you type (`Sunday Themer` → `sunday-themer`), shown live under t
 field, and flagged if it would replace an existing puzzle. The title from the
 file, if there is one, is shown underneath so you can copy it.
 
-An xword/NYT-style export can be pasted whole — one flat `grid` array with
-`size`, clues as `"1. Clue text"` strings, `answers` running parallel to them,
-`author` and `dow` becoming byline and difficulty, and `circles` kept and drawn
-as rings in the grid the way a printed puzzle does. The hand-written shape also works —
+Puzzles are given as JSON in this shape —
 
 ```js
 {
-  id: "step-by-step",            // optional: falls back to a slug of the
-  title: "Thursday Themed",      // title, then to "puzzle-1", "puzzle-2"…
+  title: "Thursday Themed",        // optional
   grid: [
-    ["A","P","E","S","black"],   // "black" marks a black square
+    ["A","P","E","S","black"],     // "black" marks a black square
     ...
   ],
   clues: {
     across: [ { number: 1, clue: "\"Planet of the ___\"", answer: "APES" }, … ],
     down:   [ { number: 1, clue: "Spanish love",          answer: "AMOR" }, … ]
-  }
+  },
+  circles: [0,0,1, …]              // optional, row-major, 1 = circled square
 }
 ```
 
-The oldest shape works too — `grid` as an array of strings, `clues` as plain
-objects keyed by number. Mixing shapes in one queue is fine.
+Rows of strings (`"APES."`) and clues as a plain map (`{ 1: "clue text" }`) are
+still accepted, and mixing shapes in one queue is fine.
 
 **Renaming.** Hover a puzzle on the home page and a Rename button appears; the
 title becomes an editable field, Enter saves and Escape cancels. Only the title
@@ -186,7 +198,8 @@ untouched — so entries can sit in the queue harmlessly.
 | Letter | Fills the square, moves to the next empty square in the word; when the word is full, jumps to the next unfinished clue |
 | Backspace | Clears the square and steps back within the word |
 | Delete | Clears the square, cursor stays put |
-| Space / Enter | Switches between Across and Down |
+| Space | Switches between Across and Down |
+| Enter | Jumps to the next clue in the same direction that still has a blank, landing on that blank (Shift-Enter goes back) |
 | Arrow, same direction | Moves one square, skipping black squares |
 | Arrow, other direction | Switches direction first, then moves on the next press |
 | Tab / Shift-Tab | Next / previous clue, landing on its first empty square |

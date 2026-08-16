@@ -633,6 +633,33 @@ function gotoEntry(step, requireEmpty) {
   }
 }
 
+/* Enter: jump to the next clue in the direction you're already going that
+   still has a blank in it, landing on that blank. Wraps around the end of the
+   Across list (or the Down list) rather than crossing over — that's what Tab
+   is for. If everything in this direction is full, it tries the other one. */
+function nextUnfilled(step) {
+  const dir = S.cur.dir;
+  const list = M.entries[dir];
+  const here = curEntry();
+  const i = list.indexOf(here);
+  const L = list.length;
+  for (let n = 1; n <= L; n++) {
+    const e = list[(((i + step * n) % L) + L) % L];
+    const empty = e.cells.find(cell => !letterAt(cell));
+    if (!empty) continue;
+    S.cur.dir = dir;
+    select(empty.r, empty.c, dir);
+    return true;
+  }
+  // nothing left across (or down) — try the other direction before giving up
+  const other = M.entries[dir === "across" ? "down" : "across"];
+  for (const e of other) {
+    const empty = e.cells.find(cell => !letterAt(cell));
+    if (empty) { S.cur.dir = e.dir; select(empty.r, empty.c, e.dir); return true; }
+  }
+  return false;
+}
+
 function advanceAfterType() {
   const e = curEntry();
   if (!e) return;
@@ -920,7 +947,7 @@ window.addEventListener("keydown", e => {
       else writeLetter(S.cur.r, S.cur.c, null);
       paint(); return;
     case " ":         e.preventDefault(); toggleDir(); return;
-    case "Enter":     e.preventDefault(); toggleDir(); return;
+    case "Enter":     e.preventDefault(); nextUnfilled(e.shiftKey ? -1 : 1); return;
     case "Tab":       e.preventDefault(); gotoEntry(e.shiftKey ? -1 : 1, false); return;
     case "ArrowLeft": e.preventDefault();
       if (S.cur.dir !== "across" && curCell().across) toggleDir(); else moveOne(0, -1); return;
