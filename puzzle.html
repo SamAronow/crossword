@@ -633,31 +633,22 @@ function gotoEntry(step, requireEmpty) {
   }
 }
 
-/* Enter: jump to the next clue in the direction you're already going that
-   still has a blank in it, landing on that blank. Wraps around the end of the
-   Across list (or the Down list) rather than crossing over — that's what Tab
-   is for. If everything in this direction is full, it tries the other one. */
+/* Enter: jump to the next clue that still has a blank in it, landing on that
+   blank. Runs through the Across list, then the Down list, then back to the
+   top — so Enter on the last Across takes you to the first Down, and Enter on
+   the last Down takes you back to the first Across. Full entries are skipped. */
 function nextUnfilled(step) {
-  const dir = S.cur.dir;
-  const list = M.entries[dir];
-  const here = curEntry();
-  const i = list.indexOf(here);
-  const L = list.length;
+  const order = M.order, L = order.length;
+  const i = order.indexOf(curEntry());
   for (let n = 1; n <= L; n++) {
-    const e = list[(((i + step * n) % L) + L) % L];
+    const e = order[(((i + step * n) % L) + L) % L];
     const empty = e.cells.find(cell => !letterAt(cell));
     if (!empty) continue;
-    S.cur.dir = dir;
-    select(empty.r, empty.c, dir);
+    S.cur.dir = e.dir;
+    select(empty.r, empty.c, e.dir);
     return true;
   }
-  // nothing left across (or down) — try the other direction before giving up
-  const other = M.entries[dir === "across" ? "down" : "across"];
-  for (const e of other) {
-    const empty = e.cells.find(cell => !letterAt(cell));
-    if (empty) { S.cur.dir = e.dir; select(empty.r, empty.c, e.dir); return true; }
-  }
-  return false;
+  return false;   // nothing blank anywhere
 }
 
 function advanceAfterType() {
