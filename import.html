@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Import puzzle files</title>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#121212;--muted:#6b6b6b;--line:#dcdcdc;--bad:#c8102e;--good:#0a7d33;
+    --font:"Libre Franklin","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--font);color:var(--ink);background:#fff;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:620px;margin:0 auto;padding:0 20px 70px}
+  header.masthead{
+    display:flex;align-items:center;gap:14px;
+    border-bottom:1px solid var(--ink);padding:16px 0;margin-bottom:22px;
+  }
+  header.masthead h1{font-size:17px;font-weight:700;margin:0;flex:1}
+  .back{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;white-space:nowrap}
+  .back:hover{text-decoration:underline}
+
+  .drop{
+    display:block;width:100%;                 /* a label is inline by default —
+                                                 without this the padding bleeds
+                                                 over the header */
+    border:2px dashed var(--line);border-radius:10px;
+    padding:42px 24px;text-align:center;color:var(--muted);
+    font-size:14px;line-height:1.6;cursor:pointer;background:#fff;
+  }
+  .drop:hover,.drop.over{border-color:var(--ink);background:#fffdf0;color:var(--ink)}
+  .drop b{display:block;font-size:16px;color:var(--ink);margin-bottom:4px}
+  .drop input{display:none}
+
+  ul{list-style:none;margin:22px 0 0;padding:0}
+  li{display:flex;gap:10px;align-items:baseline;padding:11px 0;
+     border-bottom:1px solid var(--line);font-size:13px;line-height:1.5}
+  li .mark{font-weight:700;width:1em;flex:none}
+  li .mark.ok{color:var(--good)}
+  li .mark.err{color:var(--bad)}
+  li .what{flex:1;min-width:0}
+  li input.name{
+    font-family:var(--font);font-size:14px;font-weight:600;color:var(--ink);
+    width:100%;padding:5px 7px;background:#fff;border:1px solid var(--line);border-radius:4px;
+  }
+  li input.name:focus{outline:none;border-color:var(--ink);background:#fffdf0}
+  li .id{font-family:var(--mono);font-size:11px;color:var(--muted);display:block;margin-top:3px}
+  li .src{font-size:11px;color:var(--muted);display:block;font-style:italic}
+  li .why{color:var(--bad);display:block;white-space:pre-line;margin-top:2px}
+
+  button{
+    font-family:var(--font);font-size:16px;font-weight:600;cursor:pointer;
+    width:100%;padding:15px 20px;border-radius:26px;margin-top:22px;
+    border:1px solid var(--ink);background:var(--ink);color:#fff;
+  }
+  button:disabled{background:#fff;color:var(--muted);border-color:var(--line);cursor:default}
+  p.said{font-size:13px;line-height:1.6;color:var(--muted);margin:16px 0 0;min-height:20px}
+  p.said.ok{color:var(--good);font-weight:600}
+  p.said.err{color:var(--bad);font-weight:600}
+  p.said a{color:inherit}
+  p.note{font-size:12px;color:var(--muted);line-height:1.6;margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <a class="back" href="index.html">&larr; Duo Crosswords</a>
+    <h1>Import puzzle files</h1>
+  </header>
+
+  <label class="drop" id="drop">
+    <b>Drop .puz or .ipuz files here</b>
+    or click to choose them
+    <input type="file" id="file" multiple accept=".puz,.ipuz,.json,application/octet-stream">
+  </label>
+
+  <ul id="list"></ul>
+  <button type="button" id="add" disabled>Nothing loaded</button>
+  <p class="said" id="said"></p>
+
+  <p class="note">
+    Files are read in your browser and written straight to your database &mdash;
+    nothing is uploaded anywhere else. Rebus squares (more than one letter in a
+    square) and scrambled puzzles aren't supported.
+  </p>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="crossword-core.js"></script>
+<script>
+/* ==================================================================
+   .puz — Across Lite's binary format.
+   Header at a fixed offset, then the solution grid, then NUL-separated
+   strings: title, author, copyright, every clue in numbering order, notes.
+   Optional sections follow; GEXT is the one that marks circled squares.
+================================================================== */
+function parsePuz(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+
+  const magic = s.indexOf("ACROSS&DOWN");
+  if (magic < 0) throw new Error("This isn't an Across Lite .puz file.");
+  const base = magic - 2;
+
+  const w = bytes[base + 0x2C], h = bytes[base + 0x2D];
+  const clueCount = view.getUint16(base + 0x2E, true);
+  const scrambled = view.getUint16(base + 0x32, true);
+  if (!w || !h) throw new Error("The file doesn't declare a grid size.");
+  if (scrambled) throw new Error("This puzzle's solution is scrambled, so the answers can't be read.");
+
+  let p = base + 0x34;
+  const solution = s.substr(p, w * h); p += w * h;
+  p += w * h;                                   // the saved progress grid
+
+  const readString = () => {
+    const end = s.indexOf("\0", p);
+    if (end < 0) throw new Error("The file ends in the middle of its text.");
+    const out = s.slice(p, end);
+    p = end + 1;
+    return out;
+  };
+  const title = readString(), author = readString();
+  readString();                                  // copyright
+  const clues = [];
+  for (let i = 0; i < clueCount; i++) clues.push(readString());
+
+  // Optional trailing sections: 4-char name, 2-byte length, 2-byte checksum.
+  const circles = new Set();
+  let q = s.indexOf("\0", p) + 1;
+  while (q > 0 && q + 8 <= s.length) {
+    const name = s.substr(q, 4);
+    const len = view.getUint16(q + 4, true);
+    const data = s.substr(q + 8, len);
+    if (name === "GEXT") {
+      for (let i = 0; i < data.length; i++) if (data.charCodeAt(i) & 0x80) circles.add(i);
+    }
+    if (name === "GRBS" || name === "RTBL") {
+      throw new Error("This puzzle uses rebus squares, which this app can't show.");
+    }
+    q += 8 + len + 1;
+    if (!/^[A-Z]{4}$/.test(s.substr(q, 4))) break;
+  }
+
+  const rows = [];
+  for (let r = 0; r < h; r++) {
+    rows.push(solution.substr(r * w, w).toUpperCase().replace(/[^A-Z]/g, "."));
+  }
+  return {
+    rows, title: title.trim(), byline: author.trim(),
+    clueList: clues,
+    circles: [...circles].map(i => Math.floor(i / w) + "_" + (i % w))
+  };
+}
+
+/* ==================================================================
+   .ipuz — the JSON format. Grid and solution are separate arrays, and
+   clues carry their own numbers.
+================================================================== */
+function parseIpuz(text) {
+  const j = JSON.parse(text);
+  const dim = j.dimensions || {};
+  const w = Number(dim.width), h = Number(dim.height);
+  if (!w || !h) throw new Error("This .ipuz file doesn't declare its dimensions.");
+  const block = j.block || "#";
+
+  const cellOf = (row, c) => (Array.isArray(row) ? row[c] : String(row)[c]);
+  const letterAt = (r, c) => {
+    let v = j.solution ? cellOf(j.solution[r], c) : null;
+    if (v && typeof v === "object") v = v.value || v.cell;
+    if (v == null || v === block || v === "#" || v === "" || v === 0 || v === "0") return ".";
+    const str = String(v).toUpperCase();
+    if (str.length > 1) throw new Error("This puzzle uses rebus squares, which this app can't show.");
+    return /[A-Z]/.test(str) ? str : ".";
+  };
+
+  const rows = [];
+  for (let r = 0; r < h; r++) {
+    let line = "";
+    for (let c = 0; c < w; c++) line += letterAt(r, c);
+    rows.push(line);
+  }
+
+  // Circles are a style on the layout grid, not the solution grid.
+  const circles = [];
+  if (Array.isArray(j.puzzle)) {
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      const cell = cellOf(j.puzzle[r] || [], c);
+      const style = cell && typeof cell === "object" ? cell.style : null;
+      if (style && /circle/i.test(style.shapebg || "")) circles.push(r + "_" + c);
+    }
+  }
+
+  const pull = key => {
+    const list = (j.clues || {})[key] || (j.clues || {})[key.toUpperCase()] || [];
+    const out = {};
+    list.forEach(item => {
+      if (Array.isArray(item)) out[item[0]] = String(item[1]);
+      else if (item && typeof item === "object") out[item.number] = String(item.clue);
+    });
+    return out;
+  };
+
+  return {
+    rows, title: (j.title || "").trim(), byline: (j.author || "").trim(),
+    clueMaps: { across: pull("Across"), down: pull("Down") },
+    circles
+  };
+}
+
+/* ==================================================================
+   Both formats end up as the record the app stores.
+   .puz gives clues as a flat list in numbering order, so they're matched
+   to entries by walking the grid the same way the numbering does.
+================================================================== */
+function toPuzzle(parsed) {
+  const rows = parsed.rows;
+  const h = rows.length, w = rows[0].length;
+  if (rows.some(r => r.length !== w)) throw new Error("The rows aren't all the same length.");
+  const open = (r, c) => r >= 0 && r < h && c >= 0 && c < w && rows[r][c] !== ".";
+
+  const across = {}, down = {};
+  let num = 1, ci = 0;
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      if (!open(r, c)) continue;
+      const startsAcross = !open(r, c - 1) && open(r, c + 1);
+      const startsDown = !open(r - 1, c) && open(r + 1, c);
+      if (!startsAcross && !startsDown) continue;
+      if (parsed.clueList) {
+        if (startsAcross) across[num] = parsed.clueList[ci++] || "";
+        if (startsDown) down[num] = parsed.clueList[ci++] || "";
+      } else {
+        if (startsAcross) across[num] = parsed.clueMaps.across[num] || "";
+        if (startsDown) down[num] = parsed.clueMaps.down[num] || "";
+      }
+      num++;
+    }
+  }
+  if (parsed.clueList && ci !== parsed.clueList.length) {
+    throw new Error(`The grid needs ${ci} clues but the file carries ${parsed.clueList.length}.`);
+  }
+  return {
+    grid: rows,
+    clues: { across, down },
+    shaded: parsed.circles || [],
+    sourceTitle: parsed.title,
+    byline: parsed.byline
+  };
+}
+
+/* ==================================================================
+   Page
+================================================================== */
+const $ = id => document.getElementById(id);
+const btn = $("add"), listEl = $("list"), dropEl = $("drop");
+const say = (msg, kind) => { $("said").innerHTML = msg; $("said").className = "said" + (kind ? " " + kind : ""); };
+const slug = s => (s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+let rows = [];
+let taken = new Set();
+allPuzzlesRef().once("value")
+  .then(snap => { taken = new Set(Object.keys(snap.val() || {})); })
+  .catch(err => console.error(err));
+
+function nextName() {
+  let n = 0;
+  do { n++; } while (taken.has("puzzle-" + n) || rows.some(r => r.id === "puzzle-" + n));
+  return "Puzzle " + n;
+}
+
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("Couldn't read the file."));
+    fr.onload = () => resolve(fr.result);
+    if (/\.ipuz$|\.json$/i.test(file.name)) fr.readAsText(file);
+    else fr.readAsArrayBuffer(file);
+  });
+}
+
+async function handleFiles(files) {
+  for (const file of files) {
+    const row = { file: file.name };
+    try {
+      const data = await readFile(file);
+      const parsed = typeof data === "string" ? parseIpuz(data) : parsePuz(data);
+      const p = toPuzzle(parsed);
+      const problem = gridProblem(p.grid);
+      if (problem) throw new Error(problem);
+      const M = buildModel(p);
+      const blank = M.order.filter(e => !e.clue);
+      if (blank.length) {
+        throw new Error(`No clue for ${blank.slice(0, 5).map(e => e.num + (e.dir === "across" ? "A" : "D")).join(", ")}` +
+          (blank.length > 5 ? ` and ${blank.length - 5} more` : ""));
+      }
+      row.p = p;
+      row.name = p.sourceTitle || nextName();
+      row.id = slug(row.name) || nextName().toLowerCase().replace(" ", "-");
+    } catch (err) {
+      row.why = err.message;
+    }
+    rows.push(row);
+    draw(row);
+  }
+  refreshButton();
+}
+
+function draw(row) {
+  const li = document.createElement("li");
+  li.innerHTML = `
+    <span class="mark ${row.why ? "err" : "ok"}">${row.why ? "\u2717" : "\u2713"}</span>
+    <span class="what">
+      <span class="nameslot"></span>
+      <span class="id"></span>
+      <span class="src">${row.file}</span>
+      ${row.why ? `<span class="why">${row.why}</span>` : ""}
+    </span>`;
+  row.el = li;
+  const idLine = () => row.id + " \u00b7 " + row.p.grid.length + "\u00d7" + row.p.grid[0].length +
+    (row.p.shaded.length ? " \u00b7 " + row.p.shaded.length + " circled" : "") +
+    (taken.has(row.id) ? " \u00b7 replaces an existing puzzle" : "");
+  if (row.p) {
+    const input = document.createElement("input");
+    input.className = "name";
+    input.type = "text";
+    input.value = row.name;
+    input.setAttribute("aria-label", "Name for " + row.file);
+    input.addEventListener("input", () => {
+      row.name = input.value;
+      row.id = slug(input.value);
+      li.querySelector(".id").textContent = row.id ? idLine() : "needs a name";
+    });
+    li.querySelector(".nameslot").appendChild(input);
+    li.querySelector(".id").textContent = idLine();
+  } else {
+    li.querySelector(".nameslot").textContent = row.file;
+  }
+  listEl.appendChild(li);
+}
+
+function refreshButton() {
+  const good = rows.filter(r => r.p && r.id);
+  btn.disabled = !good.length;
+  btn.textContent = good.length
+    ? `Add ${good.length} puzzle${good.length === 1 ? "" : "s"}`
+    : (rows.length ? "Nothing usable" : "Nothing loaded");
+}
+
+dropEl.addEventListener("dragover", e => { e.preventDefault(); dropEl.classList.add("over"); });
+dropEl.addEventListener("dragleave", () => dropEl.classList.remove("over"));
+dropEl.addEventListener("drop", e => {
+  e.preventDefault();
+  dropEl.classList.remove("over");
+  handleFiles(e.dataTransfer.files);
+});
+$("file").addEventListener("change", e => handleFiles(e.target.files));
+
+btn.addEventListener("click", async () => {
+  btn.disabled = true;
+  say("Adding\u2026");
+  const done = [];
+  try {
+    for (const row of rows.filter(r => r.p && r.id)) {
+      const was = await puzzleRef(row.id).once("value");
+      const record = {
+        title: row.name || row.id,
+        byline: row.p.byline || "",
+        difficulty: "",
+        grid: row.p.grid.join("\n"),
+        clues: row.p.clues,
+        createdAt: (was.exists() && was.val().createdAt) || firebase.database.ServerValue.TIMESTAMP
+      };
+      if (row.p.shaded.length) record.shaded = row.p.shaded.join(" ");
+      await puzzleRef(row.id).set(record);
+      taken.add(row.id);
+      done.push(row);
+    }
+  } catch (err) {
+    console.error(err);
+    say((done.length ? done.length + " added, then stopped: " : "") + err.message, "err");
+    btn.disabled = false;
+    return;
+  }
+  btn.textContent = "Done";
+  say(`Added ${done.map(r => `<a href="rooms.html?id=${encodeURIComponent(r.id)}">${r.name}</a>`).join(", ")}.`, "ok");
+});
+</script>
+</body>
+</html>

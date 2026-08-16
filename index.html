@@ -39,7 +39,10 @@
   }
   .you input:focus{outline:none;border-bottom-color:var(--ink)}
 
-  .listhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+  .listhead{
+    display:flex;align-items:center;justify-content:space-between;
+    gap:12px 16px;flex-wrap:wrap;margin-bottom:14px;
+  }
   h2.section{
     font-size:12px;letter-spacing:.16em;text-transform:uppercase;
     color:var(--muted);font-weight:600;margin:0;
@@ -50,6 +53,9 @@
     border:1px solid var(--ink);border-radius:18px;padding:8px 16px;
   }
   .add:hover{background:var(--ink);color:#fff}
+  .adds{display:flex;gap:8px;align-items:center}
+  .add.ghost{border-color:var(--line);color:var(--muted)}
+  .add.ghost:hover{background:#fff;color:var(--ink);border-color:var(--ink)}
   .add:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 
   ul.puzzles{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
@@ -113,7 +119,11 @@
 
   <div class="listhead">
     <h2 class="section">Puzzles</h2>
-    <a class="add" href="new.html">+ New puzzle</a>
+    <span class="adds">
+      <a class="add" href="import.html">Import file</a>
+      <a class="add" href="add-puzzles.html">Queued</a>
+      <a class="add primary" href="new.html">+ New puzzle</a>
+    </span>
   </div>
 
   <div id="mount"><p class="status">Loading&hellip;</p></div>
