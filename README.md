@@ -199,7 +199,7 @@ untouched — so entries can sit in the queue harmlessly.
 | Backspace | Clears the square and steps back within the word |
 | Delete | Clears the square, cursor stays put |
 | Space | Switches between Across and Down |
-| Enter | Jumps to the next clue in the same direction that still has a blank, landing on that blank (Shift-Enter goes back) |
+| Enter | Jumps to the next clue with a blank in it, landing on that blank — through the Acrosses, then the Downs, then back to the top (Shift-Enter goes back) |
 | Arrow, same direction | Moves one square, skipping black squares |
 | Arrow, other direction | Switches direction first, then moves on the next press |
 | Tab / Shift-Tab | Next / previous clue, landing on its first empty square |
